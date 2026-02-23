@@ -1,8 +1,8 @@
 const express = require('express');
 const cors = require('cors');
-const fs = require('fs');
 const path = require('path');
 const multer = require('multer');
+const mongoose = require('mongoose');
 
 const http = require('http');
 const { Server } = require('socket.io');
@@ -12,7 +12,6 @@ const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } });
 
 const PORT = process.env.PORT || 3000;
-const DATA_DIR = path.join(__dirname, 'data'); // Added DATA_DIR constant
 
 // Configuración de Multer para almacenar archivos de forma local
 const storage = multer.diskStorage({
@@ -26,223 +25,251 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage: storage, limits: { files: 15 } });
 
-app.use(cors());
-app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
+// --- MongoDB Config ---
+const MONGODB_URI = 'mongodb+srv://naisata:Hola2025@cluster0.vjplkwp.mongodb.net/naisata_db?retryWrites=true&w=majority';
 
-// Ruta explícita para servir socket.io client si falla por SPA
-app.get('/socket.io/socket.io.js', (req, res) => {
-    res.sendFile(path.join(__dirname, 'node_modules', 'socket.io', 'client-dist', 'socket.io.js'));
-});
+mongoose.connect(MONGODB_URI)
+    .then(() => console.log('Conectado a MongoDB excitósamente'))
+    .catch(err => console.error('Error conectando a MongoDB:', err));
 
-// Helpers to read and write JSON
-const readData = (filename) => {
-    try {
-        const data = fs.readFileSync(path.join(DATA_DIR, filename), 'utf8'); // Using DATA_DIR
-        return JSON.parse(data);
-    } catch (error) {
-        console.error(`Error reading ${filename}:`, error);
-        return [];
-    }
-};
+// --- Schemas ---
+const UserSchema = new mongoose.Schema({
+    nombre: String,
+    apellido: String,
+    correo: String,
+    telefono: String
+}, { timestamps: true });
+const User = mongoose.model('User', UserSchema);
 
-const writeData = (filename, data) => {
-    try {
-        fs.writeFileSync(path.join(DATA_DIR, filename), JSON.stringify(data, null, 2), 'utf8'); // Using DATA_DIR
-        return true;
-    } catch (error) {
-        console.error(`Error writing ${filename}:`, error);
-        return false;
-    }
-};
+const CompanySchema = new mongoose.Schema({
+    nombre: String,
+    logo: String
+}, { timestamps: true });
+const Company = mongoose.model('Company', CompanySchema);
+
+const SiteSchema = new mongoose.Schema({
+    nombre: String,
+    ubicacion: String,
+    companyId: String
+}, { timestamps: true });
+const Site = mongoose.model('Site', SiteSchema);
+
+const TicketSchema = new mongoose.Schema({
+    folio: String,
+    titulo: String,
+    descripcion: String,
+    siteId: String,
+    vendedor: String,
+    empresaId: String,
+    fotos: [String],
+    firmaTecnico: String,
+    firmaCliente: String,
+    estado: { type: String, default: 'pendiente' }
+}, { timestamps: true });
+const Ticket = mongoose.model('Ticket', TicketSchema);
+
+// CORS Update para permitir solicitudes desde el front hospedado en otro sitio
+app.use(cors({ origin: '*' }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
+app.use('/uploads', express.static(path.join(__dirname, 'public', 'uploads'))); // Solo exponer la carpeta local de subidas
 
 // --- Endpoints ---
 
 // 1. Registro (Register)
-app.post('/api/register', (req, res) => {
-    const { nombre, apellido, correo, telefono } = req.body;
+app.post('/api/register', async (req, res) => {
+    try {
+        const { nombre, apellido, correo, telefono } = req.body;
 
-    if (!nombre || !apellido || !correo || !telefono) {
-        return res.status(400).json({ error: 'Todos los campos son requeridos.' });
-    }
+        if (!nombre || !apellido || !correo || !telefono) {
+            return res.status(400).json({ error: 'Todos los campos son requeridos.' });
+        }
 
-    if (!correo.endsWith('@naisata.com')) {
-        return res.status(400).json({ error: 'Solo se permiten correos @naisata.com' });
-    }
+        if (!correo.endsWith('@naisata.com')) {
+            return res.status(400).json({ error: 'Solo se permiten correos @naisata.com' });
+        }
 
-    const users = readData('users.json');
+        const existingUser = await User.findOne({ correo });
+        if (existingUser) {
+            return res.status(400).json({ error: 'El correo ya está registrado.' });
+        }
 
-    // Check if user already exists
-    if (users.some(u => u.correo === correo)) {
-        return res.status(400).json({ error: 'El correo ya está registrado.' });
-    }
+        const newUser = new User({ nombre, apellido, correo, telefono });
+        await newUser.save();
 
-    const newUser = { id: Date.now().toString(), nombre, apellido, correo, telefono };
-    users.push(newUser);
-
-    if (writeData('users.json', users)) {
         res.status(201).json({ message: 'Usuario registrado exitosamente', user: newUser });
-    } else {
+    } catch (e) {
         res.status(500).json({ error: 'Error interno guardando el usuario.' });
     }
 });
 
 // 1.5. Iniciar Sesión (Login)
-app.post('/api/login', (req, res) => {
-    const { correo } = req.body;
+app.post('/api/login', async (req, res) => {
+    try {
+        const { correo } = req.body;
+        if (!correo) return res.status(400).json({ error: 'El correo es requerido.' });
 
-    if (!correo) {
-        return res.status(400).json({ error: 'El correo es requerido.' });
-    }
-
-    const users = readData('users.json');
-    const user = users.find(u => u.correo === correo);
-
-    if (user) {
-        res.status(200).json({ message: 'Inicio de sesión exitoso', user });
-    } else {
-        res.status(401).json({ error: 'Correo no registrado.' });
+        const user = await User.findOne({ correo });
+        if (user) {
+            res.status(200).json({ message: 'Inicio de sesión exitoso', user });
+        } else {
+            res.status(401).json({ error: 'Correo no registrado.' });
+        }
+    } catch (e) {
+        res.status(500).json({ error: 'Error interno en login.' });
     }
 });
 
 // 2. Empresas (Companies)
-app.get('/api/companies', (req, res) => {
-    const companies = readData('companies.json');
-    res.json(companies);
+app.get('/api/companies', async (req, res) => {
+    try {
+        const companies = await Company.find().sort({ createdAt: -1 });
+        // Map _id to id for backwards compatibility with frontend
+        const mapped = companies.map(c => ({ ...c.toObject(), id: c._id.toString() }));
+        res.json(mapped);
+    } catch (e) {
+        res.status(500).json({ error: 'Error obteniendo empresas.' });
+    }
 });
 
-app.post('/api/companies', upload.single('logo'), (req, res) => {
-    const { nombre } = req.body;
-    if (!nombre) return res.status(400).json({ error: 'El nombre de la empresa es requerido.' });
+app.post('/api/companies', upload.single('logo'), async (req, res) => {
+    try {
+        const { nombre } = req.body;
+        if (!nombre) return res.status(400).json({ error: 'El nombre de la empresa es requerido.' });
 
-    const logoPath = req.file ? `/uploads/${req.file.filename}` : null;
+        const logoPath = req.file ? `/uploads/${req.file.filename}` : null;
 
-    const companies = readData('companies.json');
-    const newCompany = { id: Date.now().toString(), nombre, logo: logoPath };
-    companies.push(newCompany);
+        const newCompany = new Company({ nombre, logo: logoPath });
+        await newCompany.save();
 
-    if (writeData('companies.json', companies)) {
-        io.emit('new_company', newCompany);
-        res.status(201).json(newCompany);
-    } else {
+        const responseObj = { ...newCompany.toObject(), id: newCompany._id.toString() };
+        io.emit('new_company', responseObj);
+        res.status(201).json(responseObj);
+    } catch (e) {
         res.status(500).json({ error: 'Error interno.' });
     }
 });
 
 // 3. Sitios (Sites)
-app.get('/api/sites', (req, res) => {
-    const sites = readData('sites.json');
-    res.json(sites);
+app.get('/api/sites', async (req, res) => {
+    try {
+        const sites = await Site.find().sort({ createdAt: -1 });
+        const mapped = sites.map(s => ({ ...s.toObject(), id: s._id.toString() }));
+        res.json(mapped);
+    } catch (e) {
+        res.status(500).json({ error: 'Error obteniendo sitios.' });
+    }
 });
 
-app.post('/api/sites', (req, res) => {
-    const { nombre, ubicacion, companyId } = req.body; // Opcional asociar a company, lo agrego por si acaso
-    if (!nombre || !ubicacion) return res.status(400).json({ error: 'Nombre y ubicación requeridos.' });
+app.post('/api/sites', async (req, res) => {
+    try {
+        const { nombre, ubicacion, companyId } = req.body;
+        if (!nombre || !ubicacion) return res.status(400).json({ error: 'Nombre y ubicación requeridos.' });
 
-    const sites = readData('sites.json');
-    const newSite = { id: Date.now().toString(), nombre, ubicacion, companyId };
-    sites.push(newSite);
+        const newSite = new Site({ nombre, ubicacion, companyId });
+        await newSite.save();
 
-    if (writeData('sites.json', sites)) {
-        io.emit('new_site', newSite);
-        res.status(201).json(newSite);
-    } else {
-        res.status(500).json({ error: 'Error interno.' });
+        const responseObj = { ...newSite.toObject(), id: newSite._id.toString() };
+        io.emit('new_site', responseObj);
+        res.status(201).json(responseObj);
+    } catch (e) {
+        res.status(500).json({ error: 'Error interno guardando sitio.' });
     }
 });
 
 // 4. Tickets (Entregables)
-app.get('/api/tickets/:siteId', (req, res) => {
-    const { siteId } = req.params;
-    const tickets = readData('tickets.json').filter(t => t.siteId === siteId);
-    res.json(tickets);
+app.get('/api/tickets/:siteId', async (req, res) => {
+    try {
+        const { siteId } = req.params;
+        const tickets = await Ticket.find({ siteId }).sort({ createdAt: -1 });
+        const mapped = tickets.map(t => ({ ...t.toObject(), id: t._id.toString() }));
+        res.json(mapped);
+    } catch (e) {
+        res.status(500).json({ error: 'Error obteniendo tickets.' });
+    }
 });
 
 // Remote Sign: Get single ticket info
-app.get('/api/ticket/single/:id', (req, res) => {
-    const ticketId = req.params.id;
-    const tickets = readData('tickets.json');
-    const ticket = tickets.find(t => t.id === ticketId);
+app.get('/api/ticket/single/:id', async (req, res) => {
+    try {
+        const ticketId = req.params.id;
+        const ticket = await Ticket.findById(ticketId);
 
-    if (!ticket) return res.status(404).json({ error: 'Ticket no encontrado.' });
-    if (ticket.firmaCliente) return res.status(403).json({ error: 'El ticket ya ha sido firmado por el cliente.' });
+        if (!ticket) return res.status(404).json({ error: 'Ticket no encontrado.' });
+        if (ticket.firmaCliente) return res.status(403).json({ error: 'El ticket ya ha sido firmado por el cliente.' });
 
-    // Send only necessary data for signature screen
-    res.json({
-        id: ticket.id,
-        folio: ticket.folio,
-        nombreTrabajo: ticket.titulo,
-        descripcion: ticket.descripcion,
-        fotos: ticket.fotos || []
-    });
+        // Send only necessary data for signature screen
+        res.json({
+            id: ticket._id.toString(),
+            folio: ticket.folio,
+            nombreTrabajo: ticket.titulo,
+            descripcion: ticket.descripcion,
+            fotos: ticket.fotos || []
+        });
+    } catch (e) {
+        res.status(500).json({ error: 'Error interno.' });
+    }
 });
 
 // Remote Sign: Save signature
-app.post('/api/ticket/single/:id/sign', (req, res) => {
-    const ticketId = req.params.id;
-    const { signature } = req.body; // Base64 PNG string
+app.post('/api/ticket/single/:id/sign', async (req, res) => {
+    try {
+        const ticketId = req.params.id;
+        const { signature } = req.body;
 
-    if (!signature) return res.status(400).json({ error: 'La firma es requerida.' });
+        if (!signature) return res.status(400).json({ error: 'La firma es requerida.' });
 
-    let tickets = readData('tickets.json');
-    const tIndex = tickets.findIndex(t => t.id === ticketId);
+        const ticket = await Ticket.findById(ticketId);
 
-    if (tIndex === -1) return res.status(404).json({ error: 'Ticket no encontrado.' });
-    if (tickets[tIndex].firmaCliente) return res.status(403).json({ error: 'Este ticket ya fue firmado.' });
+        if (!ticket) return res.status(404).json({ error: 'Ticket no encontrado.' });
+        if (ticket.firmaCliente) return res.status(403).json({ error: 'Este ticket ya fue firmado.' });
 
-    tickets[tIndex].firmaCliente = signature;
-    tickets[tIndex].estado = 'Terminado'; // Auto-mark completed if desired
-    writeData('tickets.json', tickets);
+        ticket.firmaCliente = signature;
+        ticket.estado = 'Terminado';
+        await ticket.save();
 
-    // Notify all connected clients (dashboard) to refresh
-    io.emit('ticket_signed', { ticketId });
+        io.emit('ticket_signed', { ticketId: ticket._id.toString() });
 
-    res.json({ message: 'Firma guardada correctamente' });
-});
-
-app.post('/api/tickets', upload.array('fotos', 15), (req, res) => {
-    // Nuevos campos agregados
-    const { folio, nombreTrabajo, descripcion, siteId, vendedor, firmaTecnico, firmaCliente, empresaId } = req.body;
-
-    if (!folio || !nombreTrabajo || !descripcion || !siteId) {
-        return res.status(400).json({ error: 'Faltan datos obligatorios del ticket.' });
-    }
-
-    // Archivos procesados por multer
-    const fotosPaths = req.files ? req.files.map(file => `/uploads/${file.filename}`) : [];
-
-    const tickets = readData('tickets.json');
-    const newTicket = {
-        id: Date.now().toString(),
-        folio,
-        titulo: nombreTrabajo, // Re-uso 'titulo' para mantener compatibilidad
-        descripcion,
-        siteId,
-        vendedor: vendedor || '',
-        empresaId: empresaId || null,
-        fotos: fotosPaths,
-        firmaTecnico: firmaTecnico || null, // Guardaremos Base64 desde el front
-        firmaCliente: firmaCliente || null,
-        estado: 'pendiente'
-    };
-
-    tickets.push(newTicket);
-
-    if (writeData('tickets.json', tickets)) {
-        io.emit('new_ticket', newTicket);
-        res.status(201).json(newTicket);
-    } else {
-        res.status(500).json({ error: 'Error interno guardando ticket.' });
+        res.json({ message: 'Firma guardada correctamente' });
+    } catch (e) {
+        res.status(500).json({ error: 'Error interno.' });
     }
 });
 
+app.post('/api/tickets', upload.array('fotos', 15), async (req, res) => {
+    try {
+        const { folio, nombreTrabajo, descripcion, siteId, vendedor, firmaTecnico, firmaCliente, empresaId } = req.body;
 
-// Serve base HTML for any other route (SPA)
-app.get('*', (req, res, next) => {
-    if (req.path.startsWith('/socket.io/')) return next();
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+        if (!folio || !nombreTrabajo || !descripcion || !siteId) {
+            return res.status(400).json({ error: 'Faltan datos obligatorios del ticket.' });
+        }
+
+        const fotosPaths = req.files ? req.files.map(file => `/uploads/${file.filename}`) : [];
+
+        const newTicket = new Ticket({
+            folio,
+            titulo: nombreTrabajo,
+            descripcion,
+            siteId,
+            vendedor: vendedor || '',
+            empresaId: empresaId || null,
+            fotos: fotosPaths,
+            firmaTecnico: firmaTecnico || null,
+            firmaCliente: firmaCliente || null,
+            estado: 'pendiente'
+        });
+
+        await newTicket.save();
+
+        const responseObj = { ...newTicket.toObject(), id: newTicket._id.toString() };
+        io.emit('new_ticket', responseObj);
+        res.status(201).json(responseObj);
+    } catch (e) {
+        res.status(500).json({ error: 'Error guardando ticket.' });
+    }
 });
 
-server.listen(PORT, () => {
-    console.log(`Servidor de Naisata ejecutándose en http://localhost:${PORT}`);
+server.listen(PORT, '0.0.0.0', () => {
+    console.log(`Servidor API ejecutándose en el puerto ${PORT}`);
 });
+
