@@ -13,17 +13,9 @@ const io = new Server(server, { cors: { origin: '*' } });
 
 const PORT = process.env.PORT || 3000;
 
-// Configuración de Multer para almacenar archivos de forma local
-const storage = multer.diskStorage({
-    destination: function (req, file, cb) {
-        cb(null, path.join(__dirname, 'public', 'uploads'));
-    },
-    filename: function (req, file, cb) {
-        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-        cb(null, uniqueSuffix + '-' + file.originalname);
-    }
-});
-const upload = multer({ storage: storage, limits: { files: 15 } });
+// Configuración de Multer para almacenar archivos en memoria (Base64)
+const storage = multer.memoryStorage();
+const upload = multer({ storage: storage, limits: { files: 15, fileSize: 15 * 1024 * 1024 } }); // 15MB max per file
 
 // --- MongoDB Config ---
 const MONGODB_URI = 'mongodb+srv://naisata:Hola2025@cluster0.vjplkwp.mongodb.net/naisata_db?retryWrites=true&w=majority';
@@ -72,7 +64,7 @@ const Ticket = mongoose.model('Ticket', TicketSchema);
 app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
-app.use('/uploads', express.static(path.join(__dirname, 'public', 'uploads'))); // Solo exponer la carpeta local de subidas
+app.use('/uploads', express.static(path.join(__dirname, 'uploads'))); // Exponer la carpeta de subidas en la raíz
 
 // --- Endpoints ---
 
@@ -137,9 +129,9 @@ app.post('/api/companies', upload.single('logo'), async (req, res) => {
         const { nombre } = req.body;
         if (!nombre) return res.status(400).json({ error: 'El nombre de la empresa es requerido.' });
 
-        const logoPath = req.file ? `/uploads/${req.file.filename}` : null;
+        const logoData = req.file ? `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}` : null;
 
-        const newCompany = new Company({ nombre, logo: logoPath });
+        const newCompany = new Company({ nombre, logo: logoData });
         await newCompany.save();
 
         const responseObj = { ...newCompany.toObject(), id: newCompany._id.toString() };
@@ -244,7 +236,7 @@ app.post('/api/tickets', upload.array('fotos', 15), async (req, res) => {
             return res.status(400).json({ error: 'Faltan datos obligatorios del ticket.' });
         }
 
-        const fotosPaths = req.files ? req.files.map(file => `/uploads/${file.filename}`) : [];
+        const fotosData = req.files ? req.files.map(file => `data:${file.mimetype};base64,${file.buffer.toString('base64')}`) : [];
 
         const newTicket = new Ticket({
             folio,
@@ -253,7 +245,7 @@ app.post('/api/tickets', upload.array('fotos', 15), async (req, res) => {
             siteId,
             vendedor: vendedor || '',
             empresaId: empresaId || null,
-            fotos: fotosPaths,
+            fotos: fotosData,
             firmaTecnico: firmaTecnico || null,
             firmaCliente: firmaCliente || null,
             estado: 'pendiente'
@@ -272,4 +264,3 @@ app.post('/api/tickets', upload.array('fotos', 15), async (req, res) => {
 server.listen(PORT, '0.0.0.0', () => {
     console.log(`Servidor API ejecutándose en el puerto ${PORT}`);
 });
-
