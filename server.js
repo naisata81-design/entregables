@@ -170,6 +170,22 @@ app.post('/api/sites', async (req, res) => {
     }
 });
 
+app.delete('/api/sites/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const deletedSite = await Site.findByIdAndDelete(id);
+        if (!deletedSite) return res.status(404).json({ error: 'Sitio no encontrado.' });
+
+        // Also delete associated tickets
+        await Ticket.deleteMany({ siteId: id });
+
+        io.emit('deleted_site', { id });
+        res.json({ message: 'Sitio eliminado correctamente' });
+    } catch (e) {
+        res.status(500).json({ error: 'Error eliminando sitio.' });
+    }
+});
+
 // 4. Tickets (Entregables)
 app.get('/api/tickets/:siteId', async (req, res) => {
     try {
