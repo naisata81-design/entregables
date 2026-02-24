@@ -56,6 +56,7 @@ const TicketSchema = new mongoose.Schema({
     fotos: [String],
     firmaTecnico: String,
     firmaCliente: String,
+    nombreCliente: String,
     estado: { type: String, default: 'pendiente' }
 }, { timestamps: true });
 const Ticket = mongoose.model('Ticket', TicketSchema);
@@ -207,9 +208,10 @@ app.get('/api/ticket/single/:id', async (req, res) => {
 app.post('/api/ticket/single/:id/sign', async (req, res) => {
     try {
         const ticketId = req.params.id;
-        const { signature } = req.body;
+        const { signature, nombreCliente } = req.body;
 
         if (!signature) return res.status(400).json({ error: 'La firma es requerida.' });
+        if (!nombreCliente) return res.status(400).json({ error: 'El nombre del cliente es requerido.' });
 
         const ticket = await Ticket.findById(ticketId);
 
@@ -217,6 +219,7 @@ app.post('/api/ticket/single/:id/sign', async (req, res) => {
         if (ticket.firmaCliente) return res.status(403).json({ error: 'Este ticket ya fue firmado.' });
 
         ticket.firmaCliente = signature;
+        ticket.nombreCliente = nombreCliente;
         ticket.estado = 'Terminado';
         await ticket.save();
 
@@ -230,7 +233,7 @@ app.post('/api/ticket/single/:id/sign', async (req, res) => {
 
 app.post('/api/tickets', upload.array('fotos', 15), async (req, res) => {
     try {
-        const { folio, nombreTrabajo, descripcion, siteId, vendedor, firmaTecnico, firmaCliente, empresaId } = req.body;
+        const { folio, nombreTrabajo, descripcion, siteId, vendedor, firmaTecnico, firmaCliente, nombreCliente, empresaId } = req.body;
 
         if (!folio || !nombreTrabajo || !descripcion || !siteId) {
             return res.status(400).json({ error: 'Faltan datos obligatorios del ticket.' });
@@ -248,6 +251,7 @@ app.post('/api/tickets', upload.array('fotos', 15), async (req, res) => {
             fotos: fotosData,
             firmaTecnico: firmaTecnico || null,
             firmaCliente: firmaCliente || null,
+            nombreCliente: nombreCliente || null,
             estado: 'pendiente'
         });
 
