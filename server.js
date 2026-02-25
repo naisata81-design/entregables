@@ -43,6 +43,7 @@ const Company = mongoose.model('Company', CompanySchema);
 const SiteSchema = new mongoose.Schema({
     nombre: String,
     ubicacion: String,
+    logo: String,
     companyId: String
 }, { timestamps: true });
 const Site = mongoose.model('Site', SiteSchema);
@@ -183,12 +184,14 @@ app.get('/api/sites', async (req, res) => {
     }
 });
 
-app.post('/api/sites', async (req, res) => {
+app.post('/api/sites', upload.single('logo'), async (req, res) => {
     try {
         const { nombre, ubicacion, companyId } = req.body;
         if (!nombre || !ubicacion) return res.status(400).json({ error: 'Nombre y ubicación requeridos.' });
 
-        const newSite = new Site({ nombre, ubicacion, companyId });
+        const logoData = req.file ? `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}` : null;
+
+        const newSite = new Site({ nombre, ubicacion, logo: logoData, companyId });
         await newSite.save();
 
         const responseObj = { ...newSite.toObject(), id: newSite._id.toString() };
@@ -196,6 +199,26 @@ app.post('/api/sites', async (req, res) => {
         res.status(201).json(responseObj);
     } catch (e) {
         res.status(500).json({ error: 'Error interno guardando sitio.' });
+    }
+});
+
+app.put('/api/sites/:id/logo', upload.single('logo'), async (req, res) => {
+    try {
+        const { id } = req.params;
+        if (!req.file) return res.status(400).json({ error: 'No se envió ninguna imagen.' });
+
+        const logoData = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
+
+        const site = await Site.findById(id);
+        if (!site) return res.status(404).json({ error: 'Cliente no encontrado.' });
+
+        site.logo = logoData;
+        await site.save();
+
+        io.emit('new_site', {}); // Trigger a frontend reload of the list
+        res.json({ message: 'Logo actualizado correctamente', logo: logoData });
+    } catch (e) {
+        res.status(500).json({ error: 'Error actualizando el logo.' });
     }
 });
 
