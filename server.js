@@ -104,13 +104,41 @@ app.post('/api/login', async (req, res) => {
         if (!correo || !password) return res.status(400).json({ error: 'Correo y contraseña son requeridos.' });
 
         const user = await User.findOne({ correo });
-        if (user && user.password === password) {
+
+        if (!user) {
+            return res.status(401).json({ error: 'Credenciales inválidas.' });
+        }
+
+        if (!user.password) {
+            return res.status(403).json({ error: 'REQUIRE_PASSWORD_SETUP' });
+        }
+
+        if (user.password === password) {
             res.status(200).json({ message: 'Inicio de sesión exitoso', user });
         } else {
             res.status(401).json({ error: 'Credenciales inválidas.' });
         }
     } catch (e) {
         res.status(500).json({ error: 'Error interno en login.' });
+    }
+});
+
+// 1.6 Configurar Contraseña (Cuentas Antiguas)
+app.post('/api/set-password', async (req, res) => {
+    try {
+        const { correo, password } = req.body;
+        if (!correo || !password) return res.status(400).json({ error: 'Correo y contraseña son requeridos.' });
+
+        const user = await User.findOne({ correo });
+        if (!user) return res.status(404).json({ error: 'Usuario no encontrado.' });
+        if (user.password) return res.status(400).json({ error: 'Este usuario ya tiene una contraseña configurada.' });
+
+        user.password = password;
+        await user.save();
+
+        res.status(200).json({ message: 'Contraseña configurada exitosamente', user });
+    } catch (e) {
+        res.status(500).json({ error: 'Error interno.' });
     }
 });
 
