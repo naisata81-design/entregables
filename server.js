@@ -173,6 +173,28 @@ app.post('/api/companies', upload.single('logo'), async (req, res) => {
     }
 });
 
+app.put('/api/companies/:id', upload.single('logo'), async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { nombre } = req.body;
+
+        const company = await Company.findById(id);
+        if (!company) return res.status(404).json({ error: 'Empresa no encontrada.' });
+
+        if (nombre) company.nombre = nombre;
+
+        if (req.file) {
+            company.logo = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
+        }
+
+        await company.save();
+        io.emit('new_company', {}); // trigger refresh
+        res.json({ message: 'Empresa actualizada', company: { ...company.toObject(), id: company._id.toString() } });
+    } catch (e) {
+        res.status(500).json({ error: 'Error actualizando empresa.' });
+    }
+});
+
 // 3. Sitios (Sites)
 app.get('/api/sites', async (req, res) => {
     try {
@@ -199,6 +221,26 @@ app.post('/api/sites', upload.single('logo'), async (req, res) => {
         res.status(201).json(responseObj);
     } catch (e) {
         res.status(500).json({ error: 'Error interno guardando sitio.' });
+    }
+});
+
+app.put('/api/sites/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { nombre, ubicacion, companyId } = req.body;
+
+        const site = await Site.findById(id);
+        if (!site) return res.status(404).json({ error: 'Cliente no encontrado.' });
+
+        if (nombre) site.nombre = nombre;
+        if (ubicacion) site.ubicacion = ubicacion;
+        site.companyId = companyId || '';
+
+        await site.save();
+        io.emit('new_site', {}); // trigger refresh
+        res.json({ message: 'Cliente actualizado', site: { ...site.toObject(), id: site._id.toString() } });
+    } catch (e) {
+        res.status(500).json({ error: 'Error actualizando cliente.' });
     }
 });
 
