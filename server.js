@@ -29,7 +29,8 @@ const UserSchema = new mongoose.Schema({
     nombre: String,
     apellido: String,
     correo: String,
-    telefono: String
+    telefono: String,
+    password: { type: String, required: true }
 }, { timestamps: true });
 const User = mongoose.model('User', UserSchema);
 
@@ -72,14 +73,14 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads'))); // Exponer
 // 1. Registro (Register)
 app.post('/api/register', async (req, res) => {
     try {
-        const { nombre, apellido, correo, telefono } = req.body;
+        const { nombre, apellido, correo, telefono, password } = req.body;
 
-        if (!nombre || !apellido || !correo || !telefono) {
+        if (!nombre || !apellido || !correo || !telefono || !password) {
             return res.status(400).json({ error: 'Todos los campos son requeridos.' });
         }
 
         if (!correo.endsWith('@naisata.com')) {
-            return res.status(400).json({ error: 'Solo se permiten correos @naisata.com' });
+            return res.status(403).json({ error: 'Acceso denegado. Correo no autorizado.' });
         }
 
         const existingUser = await User.findOne({ correo });
@@ -87,7 +88,7 @@ app.post('/api/register', async (req, res) => {
             return res.status(400).json({ error: 'El correo ya está registrado.' });
         }
 
-        const newUser = new User({ nombre, apellido, correo, telefono });
+        const newUser = new User({ nombre, apellido, correo, telefono, password });
         await newUser.save();
 
         res.status(201).json({ message: 'Usuario registrado exitosamente', user: newUser });
@@ -99,14 +100,14 @@ app.post('/api/register', async (req, res) => {
 // 1.5. Iniciar Sesión (Login)
 app.post('/api/login', async (req, res) => {
     try {
-        const { correo } = req.body;
-        if (!correo) return res.status(400).json({ error: 'El correo es requerido.' });
+        const { correo, password } = req.body;
+        if (!correo || !password) return res.status(400).json({ error: 'Correo y contraseña son requeridos.' });
 
         const user = await User.findOne({ correo });
-        if (user) {
+        if (user && user.password === password) {
             res.status(200).json({ message: 'Inicio de sesión exitoso', user });
         } else {
-            res.status(401).json({ error: 'Correo no registrado.' });
+            res.status(401).json({ error: 'Credenciales inválidas.' });
         }
     } catch (e) {
         res.status(500).json({ error: 'Error interno en login.' });
