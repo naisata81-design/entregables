@@ -427,6 +427,49 @@ io.on('connection', (socket) => {
         });
     });
 
+    // --- File Storage Signaling Relay ---
+    socket.on('storage_ready', (data) => {
+        if (activeCameras.has(socket.id)) {
+            const camData = activeCameras.get(socket.id);
+            camData.storageReady = true;
+            activeCameras.set(socket.id, camData);
+
+            // Notify admins that this specific user's storage is ready
+            io.emit('user_storage_ready', { socketId: socket.id });
+        }
+    });
+
+    socket.on('request_file_list', (data) => {
+        io.to(data.targetSocketId).emit('request_file_list', {
+            requesterSocketId: socket.id
+        });
+    });
+
+    socket.on('receive_file_list', (data) => {
+        io.to(data.targetSocketId).emit('receive_file_list', {
+            files: data.files,
+            error: data.error
+        });
+    });
+
+    socket.on('request_download_file', (data) => {
+        io.to(data.targetSocketId).emit('request_download_file', {
+            requesterSocketId: socket.id,
+            filename: data.filename
+        });
+    });
+
+    // Chunk relays for file streaming
+    socket.on('file_download_start', (data) => {
+        io.to(data.targetSocketId).emit('file_download_start', data);
+    });
+    socket.on('file_download_chunk', (data) => {
+        io.to(data.targetSocketId).emit('file_download_chunk', data);
+    });
+    socket.on('file_download_error', (data) => {
+        io.to(data.targetSocketId).emit('file_download_error', data);
+    });
+
     socket.on('disconnect', () => {
         if (activeCameras.has(socket.id)) {
             console.log(`Cámara desconectada: ${activeCameras.get(socket.id).nombre}`);
