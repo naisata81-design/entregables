@@ -378,3 +378,60 @@ app.post('/api/tickets', upload.array('fotos', 15), async (req, res) => {
 server.listen(PORT, '0.0.0.0', () => {
     console.log(`Servidor API ejecutándose en el puerto ${PORT}`);
 });
+
+// --- WebRTC Signaling (Cameras) ---
+const activeCameras = new Map(); // socket.id -> { userId, nombre, socketId }
+
+io.on('connection', (socket) => {
+    console.log('Cliente conectado:', socket.id);
+
+    // Camera Registration (from app.js)
+    socket.on('register_camera', (userData) => {
+        activeCameras.set(socket.id, {
+            userId: userData.id || userData._id,
+            nombre: `${userData.nombre} ${userData.apellido || ''}`,
+            socketId: socket.id
+        });
+        // Notify viewers that a new camera is available
+        io.emit('cameras_updated', Array.from(activeCameras.values()));
+        console.log(`Cámara registrada: ${userData.nombre}`);
+    });
+
+    // Request active cameras list (from cameras.html viewer)
+    socket.on('request_cameras', () => {
+        socket.emit('cameras_updated', Array.from(activeCameras.values()));
+    });
+
+    // WebRTC Signaling Relay
+    socket.on('webrtc_offer', (data) => {
+        // data: { targetSocketId, offer, viewerSocketId }
+        io.to(data.targetSocketId).emit('webrtc_offer', {
+            viewerSocketId: socket.id,
+            offer: data.offer
+        });
+    });
+
+    socket.on('webrtc_answer', (data) => {
+        // data: { viewerSocketId, answer }
+        io.to(data.viewerSocketId).emit('webrtc_answer', {
+            cameraSocketId: socket.id,
+            answer: data.answer
+        });
+    });
+
+    socket.on('webrtc_ice_candidate', (data) => {
+        // data: { targetSocketId, candidate }
+        io.to(data.targetSocketId).emit('webrtc_ice_candidate', {
+            senderSocketId: socket.id,
+            candidate: data.candidate
+        });
+    });
+
+    socket.on('disconnect', () => {
+        if (activeCameras.has(socket.id)) {
+            console.log(`Cámara desconectada: ${activeCameras.get(socket.id).nombre}`);
+            activeCameras.delete(socket.id);
+            io.emit('cameras_updated', Array.from(activeCameras.values()));
+        }
+    });
+});
