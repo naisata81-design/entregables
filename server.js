@@ -60,6 +60,7 @@ const TicketSchema = new mongoose.Schema({
     firmaTecnico: String,
     firmaCliente: String,
     nombreCliente: String,
+    nombreTecnico: String,
     estado: { type: String, default: 'pendiente' }
 }, { timestamps: true });
 const Ticket = mongoose.model('Ticket', TicketSchema);
@@ -346,7 +347,7 @@ app.post('/api/ticket/single/:id/sign', async (req, res) => {
 
 app.post('/api/tickets', upload.array('fotos', 15), async (req, res) => {
     try {
-        const { folio, nombreTrabajo, descripcion, siteId, vendedor, firmaTecnico, firmaCliente, nombreCliente, empresaId } = req.body;
+        const { folio, nombreTrabajo, descripcion, siteId, vendedor, firmaTecnico, firmaCliente, nombreCliente, nombreTecnico, empresaId } = req.body;
 
         if (!folio || !nombreTrabajo || !descripcion || !siteId) {
             return res.status(400).json({ error: 'Faltan datos obligatorios del ticket.' });
@@ -365,6 +366,7 @@ app.post('/api/tickets', upload.array('fotos', 15), async (req, res) => {
             firmaTecnico: firmaTecnico || null,
             firmaCliente: firmaCliente || null,
             nombreCliente: nombreCliente || null,
+            nombreTecnico: nombreTecnico || null,
             estado: 'pendiente'
         });
 
