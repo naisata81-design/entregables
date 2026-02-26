@@ -30,7 +30,8 @@ const UserSchema = new mongoose.Schema({
     apellido: String,
     correo: String,
     telefono: String,
-    password: { type: String, required: true }
+    password: { type: String, required: true },
+    rol: { type: String, default: 'user' }
 }, { timestamps: true });
 const User = mongoose.model('User', UserSchema);
 
