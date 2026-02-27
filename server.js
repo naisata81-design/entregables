@@ -56,13 +56,14 @@ const TicketSchema = new mongoose.Schema({
     descripcion: String,
     siteId: String,
     vendedor: String,
-    empresaId: String,
+    empresaId: { type: mongoose.Schema.Types.ObjectId, ref: 'Company' },
     fotos: [String],
     firmaTecnico: String,
     firmaCliente: String,
     nombreCliente: String,
     nombreTecnico: String,
-    estado: { type: String, default: 'pendiente' }
+    estado: { type: String, default: 'pendiente' },
+    descargasPdfCliente: { type: Number, default: 0 }
 }, { timestamps: true });
 const Ticket = mongoose.model('Ticket', TicketSchema);
 
@@ -329,7 +330,12 @@ app.get('/api/ticket/single/:id', async (req, res) => {
         const ticket = await Ticket.findById(ticketId);
 
         if (!ticket) return res.status(404).json({ error: 'Ticket no encontrado.' });
-        if (ticket.firmaCliente) return res.status(403).json({ error: 'El ticket ya ha sido firmado por el cliente.' });
+        if (ticket.firmaCliente) {
+            return res.json({
+                alreadySigned: true,
+                descargasRestantes: Math.max(0, 2 - (ticket.descargasPdfCliente || 0))
+            });
+        }
 
         // Send only necessary data for signature screen
         res.json({
@@ -368,6 +374,47 @@ app.post('/api/ticket/single/:id/sign', async (req, res) => {
         res.json({ message: 'Firma guardada correctamente' });
     } catch (e) {
         res.status(500).json({ error: 'Error interno.' });
+    }
+});
+
+// Remote Download: Process generation constraints and return all populated data for PDF building
+app.post('/api/ticket/single/:id/download-pdf', async (req, res) => {
+    try {
+        const ticketId = req.params.id;
+        // Fetch ticket
+        const ticket = await Ticket.findById(ticketId);
+
+        if (!ticket) return res.status(404).json({ error: 'Ticket no encontrado.' });
+        if (!ticket.firmaCliente) return res.status(403).json({ error: 'El ticket aún no ha sido firmado.' });
+
+        const descargas = ticket.descargasPdfCliente || 0;
+        if (descargas >= 2) {
+            return res.status(403).json({ error: 'Has alcanzado el límite máximo de descargas (2/2).' });
+        }
+
+        // Increment count and save
+        ticket.descargasPdfCliente = descargas + 1;
+        await ticket.save();
+
+        // Need Site and Company to build full PDF template
+        const site = await Site.findById(ticket.siteId);
+        let company = null;
+        if (site && site.companyId) {
+            company = await Company.findById(site.companyId);
+        } else if (ticket.empresaId) {
+            company = await Company.findById(ticket.empresaId);
+        }
+
+        res.json({
+            ticket: { ...ticket.toObject(), id: ticket._id.toString() },
+            site: site ? { ...site.toObject(), id: site._id.toString() } : null,
+            company: company ? { ...company.toObject(), id: company._id.toString() } : null,
+            descargasRestantes: 2 - ticket.descargasPdfCliente
+        });
+
+    } catch (e) {
+        console.error("Download Error:", e);
+        res.status(500).json({ error: 'Error interno al generar descarga.' });
     }
 });
 
