@@ -238,6 +238,10 @@ app.post('/api/login', async (req, res) => {
             return res.status(403).json({ error: 'REQUIRE_SIGNATURE_SETUP' });
         }
 
+        if (!user.fotoPerfil) {
+            return res.status(403).json({ error: 'REQUIRE_PHOTO_SETUP' });
+        }
+
         res.status(200).json({ message: 'Inicio de sesión exitoso', user });
     } catch (e) {
         res.status(500).json({ error: 'Error interno en login.' });
@@ -281,6 +285,27 @@ app.post('/api/set-signature', async (req, res) => {
         res.status(200).json({ message: 'Firma guardada exitosamente', user });
     } catch (e) {
         res.status(500).json({ error: 'Error interno.' });
+    }
+});
+
+// 1.8 Configurar Foto de Perfil (Cuentas Antiguas sin foto)
+app.post('/api/set-photo', async (req, res) => {
+    try {
+        const { correo, password, fotoPerfil } = req.body;
+        if (!correo || !password || !fotoPerfil) return res.status(400).json({ error: 'Faltan datos requeridos.' });
+
+        const user = await User.findOne({ correo });
+        if (!user) return res.status(404).json({ error: 'Usuario no encontrado.' });
+
+        if (user.password !== password) return res.status(401).json({ error: 'Credenciales inválidas para configurar foto.' });
+        if (user.fotoPerfil) return res.status(400).json({ error: 'Este usuario ya tiene una foto de perfil registrada.' });
+
+        user.fotoPerfil = fotoPerfil;
+        await user.save();
+
+        res.status(200).json({ message: 'Foto de perfil guardada exitosamente', user });
+    } catch (e) {
+        res.status(500).json({ error: 'Error interno al guardar foto.' });
     }
 });
 
