@@ -32,16 +32,25 @@ const UserSchema = new mongoose.Schema({
     password: { type: String, required: true },
     firma: String,
     rol: { type: String, default: 'user' },
-    horarioEntrada: { type: String, default: '' }, // e.g. "09:00"
-    horarioSalida: { type: String, default: '' } // e.g. "18:00"
+    usaHorarioPersonalizado: { type: Boolean, default: false },
+    horariosPorDia: [{
+        dia: Number,
+        activo: Boolean,
+        entrada: String,
+        salida: String
+    }]
 }, { timestamps: true });
 const User = mongoose.model('User', UserSchema);
 
 const SettingsSchema = new mongoose.Schema({
     tipo: { type: String, required: true, unique: true },
-    horarioEntradaGeneral: { type: String, default: '09:00' },
-    horarioSalidaGeneral: { type: String, default: '18:00' },
-    toleranciaMinutos: { type: Number, default: 15 }
+    toleranciaMinutos: { type: Number, default: 15 },
+    horariosPorDia: [{
+        dia: Number,
+        activo: Boolean,
+        entrada: String,
+        salida: String
+    }]
 }, { timestamps: true });
 const Settings = mongoose.model('Settings', SettingsSchema);
 
@@ -144,12 +153,12 @@ app.get('/api/users', async (req, res) => {
 app.put('/api/users/:id/schedule', async (req, res) => {
     try {
         const { id } = req.params;
-        const { horarioEntrada, horarioSalida } = req.body;
+        const { usaHorarioPersonalizado, horariosPorDia } = req.body;
         const user = await User.findById(id);
         if (!user) return res.status(404).json({ error: 'Usuario no encontrado.' });
 
-        user.horarioEntrada = horarioEntrada || '';
-        user.horarioSalida = horarioSalida || '';
+        user.usaHorarioPersonalizado = usaHorarioPersonalizado || false;
+        user.horariosPorDia = horariosPorDia || [];
         await user.save();
         res.json({ message: 'Horario actualizado', user });
     } catch (e) {
@@ -576,7 +585,18 @@ app.get('/api/settings/timeclock', async (req, res) => {
     try {
         let settings = await Settings.findOne({ tipo: 'timeclock' });
         if (!settings) {
-            settings = new Settings({ tipo: 'timeclock' });
+            settings = new Settings({
+                tipo: 'timeclock',
+                horariosPorDia: [
+                    { dia: 1, activo: true, entrada: '09:00', salida: '18:00' },
+                    { dia: 2, activo: true, entrada: '09:00', salida: '18:00' },
+                    { dia: 3, activo: true, entrada: '09:00', salida: '18:00' },
+                    { dia: 4, activo: true, entrada: '09:00', salida: '18:00' },
+                    { dia: 5, activo: true, entrada: '09:00', salida: '18:00' },
+                    { dia: 6, activo: true, entrada: '09:00', salida: '14:00' },
+                    { dia: 0, activo: false, entrada: '', salida: '' }
+                ]
+            });
             await settings.save();
         }
         res.json(settings);
@@ -587,13 +607,13 @@ app.get('/api/settings/timeclock', async (req, res) => {
 
 app.put('/api/settings/timeclock', async (req, res) => {
     try {
-        const { horarioEntradaGeneral, horarioSalidaGeneral, toleranciaMinutos } = req.body;
+        const { horariosPorDia, toleranciaMinutos } = req.body;
         let settings = await Settings.findOne({ tipo: 'timeclock' });
         if (!settings) settings = new Settings({ tipo: 'timeclock' });
 
-        settings.horarioEntradaGeneral = horarioEntradaGeneral;
-        settings.horarioSalidaGeneral = horarioSalidaGeneral;
-        settings.toleranciaMinutos = toleranciaMinutos;
+        if (horariosPorDia) settings.horariosPorDia = horariosPorDia;
+        if (toleranciaMinutos !== undefined) settings.toleranciaMinutos = toleranciaMinutos;
+
         await settings.save();
         io.emit('settings_updated', settings);
         res.json(settings);
