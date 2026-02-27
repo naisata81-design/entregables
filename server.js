@@ -56,7 +56,7 @@ const TicketSchema = new mongoose.Schema({
     descripcion: String,
     siteId: String,
     vendedor: String,
-    empresaId: { type: mongoose.Schema.Types.ObjectId, ref: 'Company' },
+    empresaId: String,
     fotos: [String],
     firmaTecnico: String,
     firmaCliente: String,
@@ -399,9 +399,13 @@ app.post('/api/ticket/single/:id/download-pdf', async (req, res) => {
         // Need Site and Company to build full PDF template
         const site = await Site.findById(ticket.siteId);
         let company = null;
-        if (site && site.companyId) {
+
+        // Helper to check if string is a valid 24 hex char ObjectId
+        const isValidId = (id) => /^[0-9a-fA-F]{24}$/.test(id);
+
+        if (site && site.companyId && isValidId(site.companyId)) {
             company = await Company.findById(site.companyId);
-        } else if (ticket.empresaId) {
+        } else if (ticket.empresaId && isValidId(ticket.empresaId)) {
             company = await Company.findById(ticket.empresaId);
         }
 
