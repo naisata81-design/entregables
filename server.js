@@ -31,6 +31,7 @@ const UserSchema = new mongoose.Schema({
     correo: String,
     telefono: String,
     password: { type: String, required: true },
+    firma: String,
     rol: { type: String, default: 'user' }
 }, { timestamps: true });
 const User = mongoose.model('User', UserSchema);
@@ -78,10 +79,10 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads'))); // Exponer
 // 1. Registro (Register)
 app.post('/api/register', async (req, res) => {
     try {
-        const { nombre, apellido, correo, telefono, password } = req.body;
+        const { nombre, apellido, correo, telefono, password, firma } = req.body;
 
-        if (!nombre || !apellido || !correo || !telefono || !password) {
-            return res.status(400).json({ error: 'Todos los campos son requeridos.' });
+        if (!nombre || !apellido || !correo || !telefono || !password || !firma) {
+            return res.status(400).json({ error: 'Todos los campos y la firma son requeridos.' });
         }
 
         if (!correo.endsWith('@naisata.com')) {
@@ -93,7 +94,7 @@ app.post('/api/register', async (req, res) => {
             return res.status(400).json({ error: 'El correo ya está registrado.' });
         }
 
-        const newUser = new User({ nombre, apellido, correo, telefono, password });
+        const newUser = new User({ nombre, apellido, correo, telefono, password, firma });
         await newUser.save();
 
         res.status(201).json({ message: 'Usuario registrado exitosamente', user: newUser });
@@ -118,11 +119,15 @@ app.post('/api/login', async (req, res) => {
             return res.status(403).json({ error: 'REQUIRE_PASSWORD_SETUP' });
         }
 
-        if (user.password === password) {
-            res.status(200).json({ message: 'Inicio de sesión exitoso', user });
-        } else {
-            res.status(401).json({ error: 'Credenciales inválidas.' });
+        if (user.password !== password) {
+            return res.status(401).json({ error: 'Credenciales inválidas.' });
         }
+
+        if (!user.firma) {
+            return res.status(403).json({ error: 'REQUIRE_SIGNATURE_SETUP' });
+        }
+
+        res.status(200).json({ message: 'Inicio de sesión exitoso', user });
     } catch (e) {
         res.status(500).json({ error: 'Error interno en login.' });
     }
@@ -142,6 +147,27 @@ app.post('/api/set-password', async (req, res) => {
         await user.save();
 
         res.status(200).json({ message: 'Contraseña configurada exitosamente', user });
+    } catch (e) {
+        res.status(500).json({ error: 'Error interno.' });
+    }
+});
+
+// 1.7 Configurar Firma (Cuentas Antiguas sin firma)
+app.post('/api/set-signature', async (req, res) => {
+    try {
+        const { correo, password, firma } = req.body;
+        if (!correo || !password || !firma) return res.status(400).json({ error: 'Faltan datos requeridos.' });
+
+        const user = await User.findOne({ correo });
+        if (!user) return res.status(404).json({ error: 'Usuario no encontrado.' });
+
+        if (user.password !== password) return res.status(401).json({ error: 'Credenciales inválidas para configurar firma.' });
+        if (user.firma) return res.status(400).json({ error: 'Este usuario ya tiene una firma registrada.' });
+
+        user.firma = firma;
+        await user.save();
+
+        res.status(200).json({ message: 'Firma guardada exitosamente', user });
     } catch (e) {
         res.status(500).json({ error: 'Error interno.' });
     }
