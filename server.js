@@ -65,6 +65,10 @@ const TicketSchema = new mongoose.Schema({
     estado: { type: String, default: 'pendiente' },
     descargasPdfCliente: { type: Number, default: 0 }
 }, { timestamps: true });
+
+// Optimizar ordenamiento para evitar memory limits
+TicketSchema.index({ siteId: 1, createdAt: -1 });
+
 const Ticket = mongoose.model('Ticket', TicketSchema);
 
 
@@ -315,7 +319,8 @@ app.delete('/api/sites/:id', async (req, res) => {
 app.get('/api/tickets/:siteId', async (req, res) => {
     try {
         const { siteId } = req.params;
-        const tickets = await Ticket.find({ siteId }).sort({ createdAt: -1 });
+        // Se habilita allowDiskUse para evitar el error QueryExceededMemoryLimitNoDiskUseAllowed
+        const tickets = await Ticket.find({ siteId }).sort({ createdAt: -1 }).allowDiskUse(true);
         const mapped = tickets.map(t => {
             const obj = t.toObject();
             obj.id = t._id.toString();
