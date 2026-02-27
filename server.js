@@ -73,7 +73,8 @@ const CheckInSchema = new mongoose.Schema({
     ubicacion: {
         lat: { type: Number, required: true },
         lng: { type: Number, required: true }
-    }
+    },
+    foto: { type: String }
 }, { timestamps: true });
 
 // Optimizar ordenamiento para evitar memory limits
@@ -536,12 +537,12 @@ app.post('/api/tickets/:id/photos', upload.array('fotos', 15), async (req, res) 
 // 5. Reloj Checador (Time Clock)
 app.post('/api/checkin', async (req, res) => {
     try {
-        const { userId, userName, tipo, servicio, ubicacion } = req.body;
+        const { userId, userName, tipo, servicio, ubicacion, foto } = req.body;
         if (!userId || !userName || !tipo || !servicio || !ubicacion || !ubicacion.lat || !ubicacion.lng) {
             return res.status(400).json({ error: 'Faltan datos obligatorios para el registro.' });
         }
 
-        const newCheckIn = new CheckIn({ userId, userName, tipo, servicio, ubicacion });
+        const newCheckIn = new CheckIn({ userId, userName, tipo, servicio, ubicacion, foto });
         await newCheckIn.save();
 
         io.emit('new_checkin', newCheckIn);
