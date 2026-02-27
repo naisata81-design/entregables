@@ -39,7 +39,8 @@ const UserSchema = new mongoose.Schema({
         entrada: String,
         salida: String
     }],
-    diasVacacionesDisponibles: { type: Number, default: 0 }
+    diasVacacionesDisponibles: { type: Number, default: 0 },
+    fotoPerfil: { type: String, default: '' }
 }, { timestamps: true });
 const User = mongoose.model('User', UserSchema);
 
@@ -129,10 +130,10 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads'))); // Exponer
 // 1. Registro (Register)
 app.post('/api/register', async (req, res) => {
     try {
-        const { nombre, apellido, correo, telefono, password, firma } = req.body;
+        const { nombre, apellido, correo, telefono, password, firma, fotoPerfil } = req.body;
 
-        if (!nombre || !apellido || !correo || !telefono || !password || !firma) {
-            return res.status(400).json({ error: 'Todos los campos y la firma son requeridos.' });
+        if (!nombre || !apellido || !correo || !telefono || !password || !firma || !fotoPerfil) {
+            return res.status(400).json({ error: 'Todos los campos, foto de perfil y la firma son requeridos.' });
         }
 
         if (!correo.endsWith('@naisata.com')) {
@@ -144,7 +145,7 @@ app.post('/api/register', async (req, res) => {
             return res.status(400).json({ error: 'El correo ya está registrado.' });
         }
 
-        const newUser = new User({ nombre, apellido, correo, telefono, password, firma });
+        const newUser = new User({ nombre, apellido, correo, telefono, password, firma, fotoPerfil });
         await newUser.save();
 
         res.status(201).json({ message: 'Usuario registrado exitosamente', user: newUser });
@@ -191,6 +192,25 @@ app.put('/api/users/:id/schedule', async (req, res) => {
         res.json({ message: 'Ajustes del usuario actualizados', user });
     } catch (e) {
         res.status(500).json({ error: 'Error actualizando ajustes del usuario.' });
+    }
+});
+
+// 1.4 Actualizar Foto de Perfil
+app.put('/api/users/:id/photo', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { fotoPerfil } = req.body;
+
+        if (!fotoPerfil) return res.status(400).json({ error: 'Falta la foto de perfil en la solicitud.' });
+
+        const user = await User.findById(id);
+        if (!user) return res.status(404).json({ error: 'Usuario no encontrado.' });
+
+        user.fotoPerfil = fotoPerfil;
+        await user.save();
+        res.json({ message: 'Foto de perfil actualizada', fotoPerfil: user.fotoPerfil });
+    } catch (e) {
+        res.status(500).json({ error: 'Error actualizando foto de perfil.' });
     }
 });
 
