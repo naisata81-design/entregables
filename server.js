@@ -177,13 +177,14 @@ app.get('/api/users/:id', async (req, res) => {
 app.put('/api/users/:id/schedule', async (req, res) => {
     try {
         const { id } = req.params;
-        const { usaHorarioPersonalizado, horariosPorDia, diasVacacionesDisponibles } = req.body;
+        const { usaHorarioPersonalizado, horariosPorDia, diasVacacionesDisponibles, rol } = req.body;
         const user = await User.findById(id);
         if (!user) return res.status(404).json({ error: 'Usuario no encontrado.' });
 
         if (usaHorarioPersonalizado !== undefined) user.usaHorarioPersonalizado = usaHorarioPersonalizado;
         if (horariosPorDia !== undefined) user.horariosPorDia = horariosPorDia;
         if (diasVacacionesDisponibles !== undefined) user.diasVacacionesDisponibles = diasVacacionesDisponibles;
+        if (rol !== undefined && ['admin', 'user', 'Clase C'].includes(rol)) user.rol = rol;
 
         await user.save();
         res.json({ message: 'Ajustes del usuario actualizados', user });
