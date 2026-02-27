@@ -31,9 +31,19 @@ const UserSchema = new mongoose.Schema({
     telefono: String,
     password: { type: String, required: true },
     firma: String,
-    rol: { type: String, default: 'user' }
+    rol: { type: String, default: 'user' },
+    horarioEntrada: { type: String, default: '' }, // e.g. "09:00"
+    horarioSalida: { type: String, default: '' } // e.g. "18:00"
 }, { timestamps: true });
 const User = mongoose.model('User', UserSchema);
+
+const SettingsSchema = new mongoose.Schema({
+    tipo: { type: String, required: true, unique: true },
+    horarioEntradaGeneral: { type: String, default: '09:00' },
+    horarioSalidaGeneral: { type: String, default: '18:00' },
+    toleranciaMinutos: { type: Number, default: 15 }
+}, { timestamps: true });
+const Settings = mongoose.model('Settings', SettingsSchema);
 
 const CompanySchema = new mongoose.Schema({
     nombre: String,
@@ -117,6 +127,33 @@ app.post('/api/register', async (req, res) => {
         res.status(201).json({ message: 'Usuario registrado exitosamente', user: newUser });
     } catch (e) {
         res.status(500).json({ error: 'Error interno guardando el usuario.' });
+    }
+});
+
+// 1.2 Obtener Usuarios (Para Admin)
+app.get('/api/users', async (req, res) => {
+    try {
+        const users = await User.find().select('-password -firma').sort({ createdAt: -1 });
+        res.json(users);
+    } catch (e) {
+        res.status(500).json({ error: 'Error obteniendo usuarios.' });
+    }
+});
+
+// 1.3 Asignar Horario Personalizado (Para Admin)
+app.put('/api/users/:id/schedule', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { horarioEntrada, horarioSalida } = req.body;
+        const user = await User.findById(id);
+        if (!user) return res.status(404).json({ error: 'Usuario no encontrado.' });
+
+        user.horarioEntrada = horarioEntrada || '';
+        user.horarioSalida = horarioSalida || '';
+        await user.save();
+        res.json({ message: 'Horario actualizado', user });
+    } catch (e) {
+        res.status(500).json({ error: 'Error actualizando horario personalizado.' });
     }
 });
 
@@ -534,7 +571,38 @@ app.post('/api/tickets/:id/photos', upload.array('fotos', 15), async (req, res) 
     }
 });
 
-// 5. Reloj Checador (Time Clock)
+// 5. Configuración de Reloj Checador (Settings)
+app.get('/api/settings/timeclock', async (req, res) => {
+    try {
+        let settings = await Settings.findOne({ tipo: 'timeclock' });
+        if (!settings) {
+            settings = new Settings({ tipo: 'timeclock' });
+            await settings.save();
+        }
+        res.json(settings);
+    } catch (e) {
+        res.status(500).json({ error: 'Error obteniendo configuraciones de checador.' });
+    }
+});
+
+app.put('/api/settings/timeclock', async (req, res) => {
+    try {
+        const { horarioEntradaGeneral, horarioSalidaGeneral, toleranciaMinutos } = req.body;
+        let settings = await Settings.findOne({ tipo: 'timeclock' });
+        if (!settings) settings = new Settings({ tipo: 'timeclock' });
+
+        settings.horarioEntradaGeneral = horarioEntradaGeneral;
+        settings.horarioSalidaGeneral = horarioSalidaGeneral;
+        settings.toleranciaMinutos = toleranciaMinutos;
+        await settings.save();
+        io.emit('settings_updated', settings);
+        res.json(settings);
+    } catch (e) {
+        res.status(500).json({ error: 'Error actualizando configuraciones de checador.' });
+    }
+});
+
+// 6. Reloj Checador (Time Clock)
 app.post('/api/checkin', async (req, res) => {
     try {
         const { userId, userName, tipo, servicio, ubicacion, foto } = req.body;
