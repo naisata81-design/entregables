@@ -38,7 +38,8 @@ const UserSchema = new mongoose.Schema({
         activo: Boolean,
         entrada: String,
         salida: String
-    }]
+    }],
+    diasVacacionesDisponibles: { type: Number, default: 0 }
 }, { timestamps: true });
 const User = mongoose.model('User', UserSchema);
 
@@ -96,11 +97,23 @@ const CheckInSchema = new mongoose.Schema({
     foto: { type: String }
 }, { timestamps: true });
 
+const VacationRequestSchema = new mongoose.Schema({
+    userId: { type: String, required: true },
+    userName: { type: String, required: true },
+    fechaInicio: { type: Date, required: true },
+    fechaFin: { type: Date, required: true },
+    diasSolicitados: { type: Number, required: true },
+    motivo: { type: String, required: true },
+    estado: { type: String, enum: ['pendiente', 'aprobada', 'rechazada'], default: 'pendiente' }
+}, { timestamps: true });
+
 // Optimizar ordenamiento para evitar memory limits
 TicketSchema.index({ siteId: 1, createdAt: -1 });
+VacationRequestSchema.index({ userId: 1, createdAt: -1 });
 
 const Ticket = mongoose.model('Ticket', TicketSchema);
 const CheckIn = mongoose.model('CheckIn', CheckInSchema);
+const VacationRequest = mongoose.model('VacationRequest', VacationRequestSchema);
 
 
 
@@ -149,20 +162,33 @@ app.get('/api/users', async (req, res) => {
     }
 });
 
-// 1.3 Asignar Horario Personalizado (Para Admin)
+// 1.2.1 Obtener Usuario Específico
+app.get('/api/users/:id', async (req, res) => {
+    try {
+        const user = await User.findById(req.params.id).select('-password -firma');
+        if (!user) return res.status(404).json({ error: 'Usuario no encontrado.' });
+        res.json(user);
+    } catch (e) {
+        res.status(500).json({ error: 'Error obteniendo al usuario.' });
+    }
+});
+
+// 1.3 Asignar Horario Personalizado y Vacaciones (Para Admin)
 app.put('/api/users/:id/schedule', async (req, res) => {
     try {
         const { id } = req.params;
-        const { usaHorarioPersonalizado, horariosPorDia } = req.body;
+        const { usaHorarioPersonalizado, horariosPorDia, diasVacacionesDisponibles } = req.body;
         const user = await User.findById(id);
         if (!user) return res.status(404).json({ error: 'Usuario no encontrado.' });
 
-        user.usaHorarioPersonalizado = usaHorarioPersonalizado || false;
-        user.horariosPorDia = horariosPorDia || [];
+        if (usaHorarioPersonalizado !== undefined) user.usaHorarioPersonalizado = usaHorarioPersonalizado;
+        if (horariosPorDia !== undefined) user.horariosPorDia = horariosPorDia;
+        if (diasVacacionesDisponibles !== undefined) user.diasVacacionesDisponibles = diasVacacionesDisponibles;
+
         await user.save();
-        res.json({ message: 'Horario actualizado', user });
+        res.json({ message: 'Ajustes del usuario actualizados', user });
     } catch (e) {
-        res.status(500).json({ error: 'Error actualizando horario personalizado.' });
+        res.status(500).json({ error: 'Error actualizando ajustes del usuario.' });
     }
 });
 
@@ -647,6 +673,83 @@ app.get('/api/checkins', async (req, res) => {
         res.json(checkins);
     } catch (e) {
         res.status(500).json({ error: 'Error obteniendo registros del checador.' });
+    }
+});
+
+// 7. Vacaciones (Vacation Requests)
+app.post('/api/vacations', async (req, res) => {
+    try {
+        const { userId, userName, fechaInicio, fechaFin, diasSolicitados, motivo } = req.body;
+
+        if (!userId || !fechaInicio || !fechaFin || !diasSolicitados || !motivo) {
+            return res.status(400).json({ error: 'Faltan datos obligatorios para la solicitud.' });
+        }
+
+        const user = await User.findById(userId);
+        if (!user) return res.status(404).json({ error: 'Usuario no encontrado.' });
+
+        if (user.diasVacacionesDisponibles < diasSolicitados) {
+            return res.status(400).json({ error: 'No tienes suficientes días de vacaciones disponibles.' });
+        }
+
+        const newRequest = new VacationRequest({
+            userId, userName, fechaInicio, fechaFin, diasSolicitados, motivo
+        });
+
+        await newRequest.save();
+        res.status(201).json(newRequest);
+    } catch (e) {
+        res.status(500).json({ error: 'Error guardando solicitud de vacaciones.' });
+    }
+});
+
+app.get('/api/vacations', async (req, res) => {
+    try {
+        const { userId } = req.query;
+        let requests;
+        if (userId) {
+            requests = await VacationRequest.find({ userId }).sort({ createdAt: -1 });
+        } else {
+            requests = await VacationRequest.find().sort({ createdAt: -1 });
+        }
+        res.json(requests);
+    } catch (e) {
+        res.status(500).json({ error: 'Error obteniendo solicitudes de vacaciones.' });
+    }
+});
+
+app.put('/api/vacations/:id/status', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { estado } = req.body; // 'aprobada' o 'rechazada'
+
+        if (!['aprobada', 'rechazada'].includes(estado)) {
+            return res.status(400).json({ error: 'Estado inválido.' });
+        }
+
+        const request = await VacationRequest.findById(id);
+        if (!request) return res.status(404).json({ error: 'Solicitud no encontrada.' });
+
+        if (request.estado !== 'pendiente') {
+            return res.status(400).json({ error: 'La solicitud ya ha sido procesada.' });
+        }
+
+        request.estado = estado;
+
+        if (estado === 'aprobada') {
+            const user = await User.findById(request.userId);
+            if (user && user.diasVacacionesDisponibles >= request.diasSolicitados) {
+                user.diasVacacionesDisponibles -= request.diasSolicitados;
+                await user.save();
+            } else {
+                return res.status(400).json({ error: 'El usuario ya no tiene suficientes días para aprobar la solicitud.' });
+            }
+        }
+
+        await request.save();
+        res.json(request);
+    } catch (e) {
+        res.status(500).json({ error: 'Error actualizando estado de la solicitud.' });
     }
 });
 
