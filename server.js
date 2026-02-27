@@ -380,6 +380,41 @@ app.post('/api/tickets', upload.array('fotos', 15), async (req, res) => {
     }
 });
 
+app.post('/api/tickets/:id/photos', upload.array('fotos', 15), async (req, res) => {
+    try {
+        const ticketId = req.params.id;
+
+        if (!req.files || req.files.length === 0) {
+            return res.status(400).json({ error: 'No se enviaron fotos.' });
+        }
+
+        const ticket = await Ticket.findById(ticketId);
+        if (!ticket) {
+            return res.status(404).json({ error: 'Ticket no encontrado.' });
+        }
+
+        const nuevasFotosData = req.files.map(file => `data:${file.mimetype};base64,${file.buffer.toString('base64')}`);
+
+        // Append to existing array or initialize if undefined
+        if (!ticket.fotos) {
+            ticket.fotos = [];
+        }
+
+        // Limit total photos if desired, or let it grow. For this feature, let's just append.
+        // If we want a hard cap of e.g. 50 photos total, we could check here.
+        ticket.fotos = ticket.fotos.concat(nuevasFotosData);
+
+        await ticket.save();
+
+        const responseObj = { ...ticket.toObject(), id: ticket._id.toString() };
+        io.emit('new_ticket', responseObj); // Triggers frontend to reload
+        res.status(200).json(responseObj);
+    } catch (e) {
+        console.error('Error adding photos to ticket:', e);
+        res.status(500).json({ error: 'Error agregando fotos al ticket.' });
+    }
+});
+
 
 
 server.listen(PORT, '0.0.0.0', () => {
