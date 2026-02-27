@@ -230,6 +230,24 @@ app.put('/api/companies/:id', upload.single('logo'), async (req, res) => {
     }
 });
 
+app.delete('/api/companies/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const deletedCompany = await Company.findByIdAndDelete(id);
+        if (!deletedCompany) return res.status(404).json({ error: 'Empresa no encontrada.' });
+
+        // Unlink from sites
+        await Site.updateMany({ companyId: id }, { $unset: { companyId: 1 } });
+        // Unlink from tickets
+        await Ticket.updateMany({ empresaId: id }, { $unset: { empresaId: 1 } });
+
+        io.emit('deleted_company', { id });
+        res.json({ message: 'Empresa eliminada correctamente' });
+    } catch (e) {
+        res.status(500).json({ error: 'Error eliminando empresa.' });
+    }
+});
+
 // 3. Sitios (Sites)
 app.get('/api/sites', async (req, res) => {
     try {
