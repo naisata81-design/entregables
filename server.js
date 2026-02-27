@@ -726,6 +726,100 @@ app.get('/api/checkins', async (req, res) => {
     }
 });
 
+// Endpoint para el "Empleado de la Semana"
+app.get('/api/employee-of-the-week', async (req, res) => {
+    try {
+        const sevenDaysAgo = new Date();
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+        // Fetch Entradas from the last 7 days
+        const checkins = await CheckIn.find({
+            tipo: 'Entrada',
+            timestamp: { $gte: sevenDaysAgo }
+        });
+
+        if (checkins.length === 0) {
+            return res.json({ winner: null });
+        }
+
+        let settings = await Settings.findOne({ tipo: 'timeclock' });
+        const globalTolerancia = settings ? settings.toleranciaMinutos : 15;
+        const globalHorarios = settings ? settings.horariosPorDia : [];
+
+        // Pre-fetch users to get their schedules
+        const users = await User.find({ rol: { $in: ['user', 'Clase C'] } });
+        const userMap = {};
+        users.forEach(u => userMap[u._id.toString()] = u);
+
+        const userStats = {}; // userId -> stat tracker
+
+        for (const checkin of checkins) {
+            const uid = checkin.userId;
+            if (!userMap[uid]) continue; // Ignore admins or deleted users
+
+            if (!userStats[uid]) {
+                userStats[uid] = {
+                    nombre: userMap[uid].nombre,
+                    apellido: userMap[uid].apellido,
+                    fotoPerfil: userMap[uid].fotoPerfil,
+                    retardos: 0,
+                    totalCheckins: 0
+                };
+            }
+
+            userStats[uid].totalCheckins++;
+
+            // Retardo logic
+            const u = userMap[uid];
+            const date = new Date(checkin.timestamp);
+            const dayOfWeek = date.getDay(); // 0(Sun) - 6(Sat)
+
+            let horarioDia;
+            if (u.usaHorarioPersonalizado && u.horariosPorDia) {
+                horarioDia = u.horariosPorDia.find(h => h.dia === dayOfWeek);
+            } else {
+                horarioDia = globalHorarios.find(h => h.dia === dayOfWeek);
+            }
+
+            if (horarioDia && horarioDia.activo && horarioDia.entrada) {
+                const [h, m] = horarioDia.entrada.split(':').map(Number);
+                const entryTimeMinutes = h * 60 + m;
+                const checkinTimeMinutes = date.getHours() * 60 + date.getMinutes();
+
+                if (checkinTimeMinutes > (entryTimeMinutes + globalTolerancia)) {
+                    userStats[uid].retardos++;
+                }
+            }
+        }
+
+        // Find the winner: Minimum retardos, but must have the highest checkins in case of a tie
+        let winner = null;
+        let minRetardos = Infinity;
+        let maxCheckins = 0;
+
+        for (const uid in userStats) {
+            const stat = userStats[uid];
+            if (stat.retardos < minRetardos) {
+                minRetardos = stat.retardos;
+                maxCheckins = stat.totalCheckins;
+                winner = stat;
+            } else if (stat.retardos === minRetardos) {
+                // Tie breaker: The one who showed up more times wins
+                if (stat.totalCheckins > maxCheckins) {
+                    maxCheckins = stat.totalCheckins;
+                    winner = stat;
+                }
+            }
+        }
+
+        res.json({ winner });
+
+    } catch (e) {
+        console.error('Error calculando empleado de la semana:', e);
+        res.status(500).json({ error: 'Error interno obteniendo empleado de la semana.' });
+    }
+});
+
 // 7. Vacaciones (Vacation Requests)
 app.post('/api/vacations', async (req, res) => {
     try {
