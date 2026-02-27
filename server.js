@@ -3,7 +3,6 @@ const cors = require('cors');
 const path = require('path');
 const multer = require('multer');
 const mongoose = require('mongoose');
-
 const http = require('http');
 const { Server } = require('socket.io');
 
@@ -66,10 +65,22 @@ const TicketSchema = new mongoose.Schema({
     descargasPdfCliente: { type: Number, default: 0 }
 }, { timestamps: true });
 
+const CheckInSchema = new mongoose.Schema({
+    userId: { type: String, required: true },
+    userName: { type: String, required: true },
+    tipo: { type: String, enum: ['Entrada', 'Salida'], required: true },
+    servicio: { type: String, required: true },
+    ubicacion: {
+        lat: { type: Number, required: true },
+        lng: { type: Number, required: true }
+    }
+}, { timestamps: true });
+
 // Optimizar ordenamiento para evitar memory limits
 TicketSchema.index({ siteId: 1, createdAt: -1 });
 
 const Ticket = mongoose.model('Ticket', TicketSchema);
+const CheckIn = mongoose.model('CheckIn', CheckInSchema);
 
 
 
@@ -521,6 +532,35 @@ app.post('/api/tickets/:id/photos', upload.array('fotos', 15), async (req, res) 
         res.status(500).json({ error: 'Error agregando fotos al ticket.' });
     }
 });
+
+// 5. Reloj Checador (Time Clock)
+app.post('/api/checkin', async (req, res) => {
+    try {
+        const { userId, userName, tipo, servicio, ubicacion } = req.body;
+        if (!userId || !userName || !tipo || !servicio || !ubicacion || !ubicacion.lat || !ubicacion.lng) {
+            return res.status(400).json({ error: 'Faltan datos obligatorios para el registro.' });
+        }
+
+        const newCheckIn = new CheckIn({ userId, userName, tipo, servicio, ubicacion });
+        await newCheckIn.save();
+
+        io.emit('new_checkin', newCheckIn);
+        res.status(201).json(newCheckIn);
+    } catch (e) {
+        console.error('Error guardando registro de checador:', e);
+        res.status(500).json({ error: 'Error guardando registro de checador.' });
+    }
+});
+
+app.get('/api/checkins', async (req, res) => {
+    try {
+        const checkins = await CheckIn.find().sort({ createdAt: -1 }).limit(100);
+        res.json(checkins);
+    } catch (e) {
+        res.status(500).json({ error: 'Error obteniendo registros del checador.' });
+    }
+});
+
 
 
 
