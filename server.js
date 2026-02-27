@@ -316,9 +316,16 @@ app.get('/api/tickets/:siteId', async (req, res) => {
     try {
         const { siteId } = req.params;
         const tickets = await Ticket.find({ siteId }).sort({ createdAt: -1 });
-        const mapped = tickets.map(t => ({ ...t.toObject(), id: t._id.toString() }));
+        const mapped = tickets.map(t => {
+            const obj = t.toObject();
+            obj.id = t._id.toString();
+            // Clean up potentially corrupted schema refs
+            if (obj.empresaId === "") obj.empresaId = null;
+            return obj;
+        });
         res.json(mapped);
     } catch (e) {
+        console.error("Error obteniendo tickets:", e);
         res.status(500).json({ error: 'Error obteniendo tickets.' });
     }
 });
@@ -438,7 +445,7 @@ app.post('/api/tickets', upload.array('fotos', 15), async (req, res) => {
             descripcion,
             siteId,
             vendedor: vendedor || '',
-            empresaId: empresaId || null,
+            empresaId: empresaId ? empresaId : null,
             fotos: fotosData,
             firmaTecnico: firmaTecnico || null,
             firmaCliente: firmaCliente || null,
