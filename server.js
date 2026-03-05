@@ -77,6 +77,7 @@ const TicketSchema = new mongoose.Schema({
     siteId: String,
     vendedor: String,
     empresaId: String,
+    ordenCompra: String,
     fotos: [String],
     firmaTecnico: String,
     firmaCliente: String,
@@ -585,7 +586,7 @@ app.post('/api/ticket/single/:id/download-pdf', async (req, res) => {
 
 app.post('/api/tickets', upload.array('fotos', 15), async (req, res) => {
     try {
-        const { folio, nombreTrabajo, descripcion, siteId, vendedor, firmaTecnico, firmaCliente, nombreCliente, nombreTecnico, empresaId } = req.body;
+        const { folio, nombreTrabajo, descripcion, siteId, vendedor, firmaTecnico, firmaCliente, nombreCliente, nombreTecnico, empresaId, ordenCompra } = req.body;
 
         if (!folio || !nombreTrabajo || !descripcion || !siteId) {
             return res.status(400).json({ error: 'Faltan datos obligatorios del ticket.' });
@@ -600,6 +601,7 @@ app.post('/api/tickets', upload.array('fotos', 15), async (req, res) => {
             siteId,
             vendedor: vendedor || '',
             empresaId: empresaId ? empresaId : null,
+            ordenCompra: ordenCompra || '',
             fotos: fotosData,
             firmaTecnico: firmaTecnico || null,
             firmaCliente: firmaCliente || null,
@@ -617,6 +619,40 @@ app.post('/api/tickets', upload.array('fotos', 15), async (req, res) => {
         res.status(500).json({ error: 'Error guardando ticket.' });
     }
 });
+
+// Edit ticket
+app.put('/api/tickets/:id', upload.array('fotos', 15), async (req, res) => {
+    try {
+        const ticketId = req.params.id;
+        const { folio, nombreTrabajo, descripcion, vendedor, nombreTecnico, ordenCompra } = req.body;
+
+        const ticket = await Ticket.findById(ticketId);
+        if (!ticket) return res.status(404).json({ error: 'Ticket no encontrado.' });
+
+        if (folio !== undefined) ticket.folio = folio;
+        if (nombreTrabajo !== undefined) ticket.titulo = nombreTrabajo;
+        if (descripcion !== undefined) ticket.descripcion = descripcion;
+        if (vendedor !== undefined) ticket.vendedor = vendedor;
+        if (nombreTecnico !== undefined) ticket.nombreTecnico = nombreTecnico;
+        if (ordenCompra !== undefined) ticket.ordenCompra = ordenCompra;
+
+        if (req.files && req.files.length > 0) {
+            const nuevasFotosData = req.files.map(file => `data:${file.mimetype};base64,${file.buffer.toString('base64')}`);
+            if (!ticket.fotos) ticket.fotos = [];
+            ticket.fotos = ticket.fotos.concat(nuevasFotosData);
+        }
+
+        await ticket.save();
+
+        const responseObj = { ...ticket.toObject(), id: ticket._id.toString() };
+        io.emit('new_ticket', responseObj); // Trigger update on clients
+        res.status(200).json(responseObj);
+    } catch (e) {
+        console.error('Error editing ticket:', e);
+        res.status(500).json({ error: 'Error actualizando ticket.' });
+    }
+});
+
 
 app.post('/api/tickets/:id/photos', upload.array('fotos', 15), async (req, res) => {
     try {
