@@ -470,7 +470,8 @@ app.get('/api/tickets/:siteId', async (req, res) => {
     try {
         const { siteId } = req.params;
         // Se habilita allowDiskUse para evitar el error QueryExceededMemoryLimitNoDiskUseAllowed
-        const tickets = await Ticket.find({ siteId }).sort({ createdAt: -1 }).allowDiskUse(true);
+        // Excluimos las fotos y firmas para no saturar la red y memoria (se descargarán cuando se pida el PDF)
+        const tickets = await Ticket.find({ siteId }).select('-fotos -firmaTecnico -firmaCliente').sort({ createdAt: -1 }).allowDiskUse(true);
         const mapped = tickets.map(t => {
             const obj = t.toObject();
             obj.id = t._id.toString();
@@ -482,6 +483,22 @@ app.get('/api/tickets/:siteId', async (req, res) => {
     } catch (e) {
         console.error("Error obteniendo tickets:", e);
         res.status(500).json({ error: 'Error obteniendo tickets.' });
+    }
+});
+
+// Admin Download: Get full ticket info for PDF (including heavy photos and signatures)
+app.get('/api/tickets/full/:id', async (req, res) => {
+    try {
+        const ticketId = req.params.id;
+        const ticket = await Ticket.findById(ticketId);
+        if (!ticket) return res.status(404).json({ error: 'Ticket no encontrado.' });
+        
+        const obj = ticket.toObject();
+        obj.id = ticket._id.toString();
+        res.json(obj);
+    } catch (e) {
+        console.error("Error obteniendo ticket completo:", e);
+        res.status(500).json({ error: 'Error interno obteniendo detalles completos.' });
     }
 });
 
@@ -755,7 +772,8 @@ app.post('/api/checkin', async (req, res) => {
 
 app.get('/api/checkins', async (req, res) => {
     try {
-        const checkins = await CheckIn.find().sort({ createdAt: -1 }).limit(100);
+        // Excluimos 'foto' para no sobrecargar el ancho de banda
+        const checkins = await CheckIn.find().select('-foto').sort({ createdAt: -1 }).limit(100);
         res.json(checkins);
     } catch (e) {
         res.status(500).json({ error: 'Error obteniendo registros del checador.' });
