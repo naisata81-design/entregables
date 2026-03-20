@@ -642,7 +642,7 @@ app.post('/api/tickets', upload.array('fotos', 15), async (req, res) => {
 app.put('/api/tickets/:id', upload.array('fotos', 15), async (req, res) => {
     try {
         const ticketId = req.params.id;
-        const { folio, nombreTrabajo, descripcion, vendedor, nombreTecnico, ordenCompra } = req.body;
+        const { folio, nombreTrabajo, descripcion, vendedor, nombreTecnico, ordenCompra, siteId } = req.body;
 
         const ticket = await Ticket.findById(ticketId);
         if (!ticket) return res.status(404).json({ error: 'Ticket no encontrado.' });
@@ -653,6 +653,7 @@ app.put('/api/tickets/:id', upload.array('fotos', 15), async (req, res) => {
         if (vendedor !== undefined) ticket.vendedor = vendedor;
         if (nombreTecnico !== undefined) ticket.nombreTecnico = nombreTecnico;
         if (ordenCompra !== undefined) ticket.ordenCompra = ordenCompra;
+        if (siteId) ticket.siteId = siteId;
 
         if (req.files && req.files.length > 0) {
             const nuevasFotosData = req.files.map(file => `data:${file.mimetype};base64,${file.buffer.toString('base64')}`);
@@ -671,6 +672,20 @@ app.put('/api/tickets/:id', upload.array('fotos', 15), async (req, res) => {
     }
 });
 
+// Delete ticket
+app.delete('/api/tickets/:id', async (req, res) => {
+    try {
+        const ticketId = req.params.id;
+        const ticket = await Ticket.findByIdAndDelete(ticketId);
+        if (!ticket) return res.status(404).json({ error: 'Ticket no encontrado.' });
+        
+        io.emit('delete_ticket', ticketId);
+        res.status(200).json({ message: 'Ticket eliminado con éxito' });
+    } catch (e) {
+        console.error('Error eliminando ticket:', e);
+        res.status(500).json({ error: 'Error interno eliminando ticket.' });
+    }
+});
 
 app.post('/api/tickets/:id/photos', upload.array('fotos', 15), async (req, res) => {
     try {
