@@ -633,7 +633,8 @@ app.post('/api/tickets', upload.array('fotos', 15), async (req, res) => {
         io.emit('new_ticket', responseObj);
         res.status(201).json(responseObj);
     } catch (e) {
-        res.status(500).json({ error: 'Error guardando ticket.' });
+        console.error("Error en POST /api/tickets:", e);
+        res.status(500).json({ error: 'Error guardando ticket en el servidor.' });
     }
 });
 
@@ -702,7 +703,7 @@ app.post('/api/tickets/:id/photos', upload.array('fotos', 15), async (req, res) 
         res.status(200).json(responseObj);
     } catch (e) {
         console.error('Error adding photos to ticket:', e);
-        res.status(500).json({ error: 'Error agregando fotos al ticket.' });
+        res.status(500).json({ error: 'Error agregando fotos al ticket en el servidor.' });
     }
 });
 
