@@ -470,8 +470,8 @@ app.get('/api/tickets/:siteId', async (req, res) => {
     try {
         const { siteId } = req.params;
         // Se habilita allowDiskUse para evitar el error QueryExceededMemoryLimitNoDiskUseAllowed
-        // Excluimos las fotos y firmas para no saturar la red y memoria (se descargarán cuando se pida el PDF)
-        const tickets = await Ticket.find({ siteId }).select('-fotos -firmaTecnico -firmaCliente').sort({ createdAt: -1 }).allowDiskUse(true);
+        // Excluimos las fotos para no saturar la red y memoria (se descargarán cuando se pida el PDF). Mantenemos firmas para la UI.
+        const tickets = await Ticket.find({ siteId }).select('-fotos').sort({ createdAt: -1 }).allowDiskUse(true);
         const mapped = tickets.map(t => {
             const obj = t.toObject();
             obj.id = t._id.toString();
@@ -630,6 +630,7 @@ app.post('/api/tickets', upload.array('fotos', 15), async (req, res) => {
         await newTicket.save();
 
         const responseObj = { ...newTicket.toObject(), id: newTicket._id.toString() };
+        delete responseObj.fotos; // Strip heavy photos from WebSocket payload
         io.emit('new_ticket', responseObj);
         res.status(201).json(responseObj);
     } catch (e) {
@@ -664,6 +665,7 @@ app.put('/api/tickets/:id', upload.array('fotos', 15), async (req, res) => {
         await ticket.save();
 
         const responseObj = { ...ticket.toObject(), id: ticket._id.toString() };
+        delete responseObj.fotos; // Strip heavy photos from WebSocket payload
         io.emit('new_ticket', responseObj); // Trigger update on clients
         res.status(200).json(responseObj);
     } catch (e) {
