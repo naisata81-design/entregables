@@ -118,10 +118,16 @@ const Ticket = mongoose.model('Ticket', TicketSchema);
 const CheckIn = mongoose.model('CheckIn', CheckInSchema);
 const VacationRequest = mongoose.model('VacationRequest', VacationRequestSchema);
 
+const ProjectSchema = new mongoose.Schema({
+    nombre: String,
+    descripcion: String
+}, { timestamps: true });
+const ProjectModel = mongoose.model('Project', ProjectSchema);
+
 const PlanSchema = new mongoose.Schema({
     nombre: String,
     imagen: String, // Base64
-    siteId: String
+    proyectoId: String
 }, { timestamps: true });
 const PlanModel = mongoose.model('Plan', PlanSchema);
 
@@ -988,10 +994,34 @@ app.put('/api/vacations/:id/status', async (req, res) => {
 
 
 // --- Interactive Plans & Markers ---
-app.get('/api/plans/:siteId', async (req, res) => {
+app.get('/api/projects', async (req, res) => {
     try {
-        const { siteId } = req.params;
-        const plans = await PlanModel.find({ siteId }).sort({ createdAt: -1 });
+        const projects = await ProjectModel.find().sort({ createdAt: -1 });
+        const mapped = projects.map(p => ({ ...p.toObject(), id: p._id.toString() }));
+        res.json(mapped);
+    } catch (e) {
+        res.status(500).json({ error: 'Error obteniendo proyectos.' });
+    }
+});
+
+app.post('/api/projects', async (req, res) => {
+    try {
+        const { nombre, descripcion } = req.body;
+        if (!nombre) return res.status(400).json({ error: 'El nombre es obligatorio.' });
+        const newProject = new ProjectModel({ nombre, descripcion });
+        await newProject.save();
+        const responseObj = { ...newProject.toObject(), id: newProject._id.toString() };
+        io.emit('new_project', responseObj);
+        res.status(201).json(responseObj);
+    } catch (e) {
+        res.status(500).json({ error: 'Error agregando proyecto.' });
+    }
+});
+
+app.get('/api/plans/project/:proyectoId', async (req, res) => {
+    try {
+        const { proyectoId } = req.params;
+        const plans = await PlanModel.find({ proyectoId }).sort({ createdAt: -1 });
         const mapped = plans.map(p => ({ ...p.toObject(), id: p._id.toString() }));
         res.json(mapped);
     } catch (e) {
@@ -1001,13 +1031,13 @@ app.get('/api/plans/:siteId', async (req, res) => {
 
 app.post('/api/plans', upload.single('imagen'), async (req, res) => {
     try {
-        const { nombre, siteId } = req.body;
-        if (!nombre || !siteId) return res.status(400).json({ error: 'Nombre y siteId son requeridos.' });
+        const { nombre, proyectoId } = req.body;
+        if (!nombre || !proyectoId) return res.status(400).json({ error: 'Nombre y proyectoId son requeridos.' });
 
         const imagenData = req.file ? `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}` : null;
         if (!imagenData) return res.status(400).json({ error: 'La imagen del plano es obligatoria.' });
 
-        const newPlan = new PlanModel({ nombre, imagen: imagenData, siteId });
+        const newPlan = new PlanModel({ nombre, imagen: imagenData, proyectoId });
         await newPlan.save();
 
         const responseObj = { ...newPlan.toObject(), id: newPlan._id.toString() };
