@@ -118,6 +118,23 @@ const Ticket = mongoose.model('Ticket', TicketSchema);
 const CheckIn = mongoose.model('CheckIn', CheckInSchema);
 const VacationRequest = mongoose.model('VacationRequest', VacationRequestSchema);
 
+const PlanSchema = new mongoose.Schema({
+    nombre: String,
+    imagen: String, // Base64
+    siteId: String
+}, { timestamps: true });
+const PlanModel = mongoose.model('Plan', PlanSchema);
+
+const PlanMarkerSchema = new mongoose.Schema({
+    planId: String,
+    x: Number,
+    y: Number,
+    tipo: String, // 'Nodo Simple', 'Cámara', etc.
+    codigo: String,
+    estado: { type: String, default: 'Pendiente' },
+    notas: { type: String, default: '' }
+}, { timestamps: true });
+const PlanMarker = mongoose.model('PlanMarker', PlanMarkerSchema);
 
 
 // CORS Update para permitir solicitudes desde el front hospedado en otro sitio
@@ -970,6 +987,113 @@ app.put('/api/vacations/:id/status', async (req, res) => {
 });
 
 
+// --- Interactive Plans & Markers ---
+app.get('/api/plans/:siteId', async (req, res) => {
+    try {
+        const { siteId } = req.params;
+        const plans = await PlanModel.find({ siteId }).sort({ createdAt: -1 });
+        const mapped = plans.map(p => ({ ...p.toObject(), id: p._id.toString() }));
+        res.json(mapped);
+    } catch (e) {
+        res.status(500).json({ error: 'Error obteniendo planos.' });
+    }
+});
+
+app.post('/api/plans', upload.single('imagen'), async (req, res) => {
+    try {
+        const { nombre, siteId } = req.body;
+        if (!nombre || !siteId) return res.status(400).json({ error: 'Nombre y siteId son requeridos.' });
+
+        const imagenData = req.file ? `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}` : null;
+        if (!imagenData) return res.status(400).json({ error: 'La imagen del plano es obligatoria.' });
+
+        const newPlan = new PlanModel({ nombre, imagen: imagenData, siteId });
+        await newPlan.save();
+
+        const responseObj = { ...newPlan.toObject(), id: newPlan._id.toString() };
+        io.emit('new_plan', responseObj);
+        res.status(201).json(responseObj);
+    } catch (e) {
+        res.status(500).json({ error: 'Error interno guardando plano.' });
+    }
+});
+
+app.delete('/api/plans/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const deletedPlan = await PlanModel.findByIdAndDelete(id);
+        if (!deletedPlan) return res.status(404).json({ error: 'Plano no encontrado.' });
+        
+        await PlanMarker.deleteMany({ planId: id });
+        io.emit('deleted_plan', { id });
+        res.json({ message: 'Plano eliminado correctamente' });
+    } catch (e) {
+        res.status(500).json({ error: 'Error eliminando plano.' });
+    }
+});
+
+app.get('/api/plans/:id/markers', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const markers = await PlanMarker.find({ planId: id });
+        const mapped = markers.map(m => ({ ...m.toObject(), id: m._id.toString() }));
+        res.json(mapped);
+    } catch (e) {
+        res.status(500).json({ error: 'Error obteniendo marcadores.' });
+    }
+});
+
+app.post('/api/plans/:id/markers', async (req, res) => {
+    try {
+        const planId = req.params.id;
+        const { x, y, tipo, codigo } = req.body;
+        if (x == null || y == null || !tipo || !codigo) {
+            return res.status(400).json({ error: 'Faltan datos del marcador.' });
+        }
+
+        const newMarker = new PlanMarker({ planId, x, y, tipo, codigo });
+        await newMarker.save();
+
+        const responseObj = { ...newMarker.toObject(), id: newMarker._id.toString() };
+        io.emit('new_marker', responseObj);
+        res.status(201).json(responseObj);
+    } catch (e) {
+        res.status(500).json({ error: 'Error guardando marcador.' });
+    }
+});
+
+app.put('/api/markers/:id', async (req, res) => {
+    try {
+        const markerId = req.params.id;
+        const { estado, notas } = req.body;
+        
+        const marker = await PlanMarker.findById(markerId);
+        if (!marker) return res.status(404).json({ error: 'Marcador no encontrado.' });
+
+        if (estado !== undefined) marker.estado = estado;
+        if (notas !== undefined) marker.notas = notas;
+
+        await marker.save();
+        const responseObj = { ...marker.toObject(), id: marker._id.toString() };
+        io.emit('update_marker', responseObj);
+        res.json(responseObj);
+    } catch (e) {
+        res.status(500).json({ error: 'Error actualizando marcador.' });
+    }
+});
+
+app.delete('/api/markers/:id', async (req, res) => {
+    try {
+        const markerId = req.params.id;
+        const deletedMarker = await PlanMarker.findByIdAndDelete(markerId);
+        if (!deletedMarker) return res.status(404).json({ error: 'Marcador no encontrado.' });
+        
+        io.emit('delete_marker', markerId);
+        res.json({ message: 'Marcador eliminado.' });
+    } catch (e) {
+        res.status(500).json({ error: 'Error eliminando marcador.' });
+    }
+});
 
 
 server.listen(PORT, '0.0.0.0', () => {
