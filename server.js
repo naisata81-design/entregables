@@ -339,7 +339,20 @@ app.post('/api/login', async (req, res) => {
             return res.status(401).json({ error: 'Credenciales inválidas.' });
         }
 
-        if (user.isVerified === false) {
+        // Bloqueo y envío de código para TODOS los usuarios no verificados
+        if (!user.isVerified) {
+            const newCode = Math.floor(100000 + Math.random() * 900000).toString();
+            user.verificationCode = newCode;
+            user.isVerified = false;
+            await user.save();
+
+            transporter.sendMail({
+                from: '"Soporte Naisata" <naisata81@gmail.com>',
+                to: correo,
+                subject: 'Verifica tu cuenta - Naisata Platform',
+                html: `<h2>Código de Verificación Naisata</h2><p>Tu código es: <b style="font-size:24px; color:#2ecc71;">${newCode}</b></p>`
+            }).catch(e => console.error("SMTP Err", e));
+
             return res.status(403).json({ error: 'REQUIRE_VERIFICATION', requireVerification: true });
         }
 
