@@ -182,13 +182,13 @@ app.post('/api/register', async (req, res) => {
                  if (!existingUser.verificationCode || !existingUser.verificationCodeExpires || now > existingUser.verificationCodeExpires) {
                      const newCode = Math.floor(100000 + Math.random() * 900000).toString();
                      existingUser.verificationCode = newCode;
-                     existingUser.verificationCodeExpires = new Date(now.getTime() + 5 * 60 * 1000);
+                     existingUser.verificationCodeExpires = new Date(now.getTime() + 30 * 60 * 1000); // 30 minutos
                      await existingUser.save();
-                     await transporter.sendMail({
+                     transporter.sendMail({
                          from: '"Soporte Naisata" <naisata81@gmail.com>',
                          to: correo,
                          subject: 'Verifica tu cuenta - Naisata Platform',
-                         html: `<h2>Código de Verificación Naisata</h2><p>Tu código es: <b style="font-size:24px; color:#2ecc71;">${newCode}</b></p><p>Este código expira en 5 minutos.</p>`
+                         html: `<h2>Código de Verificación Naisata</h2><p>Tu código es: <b style="font-size:24px; color:#2ecc71;">${newCode}</b></p><p>Este código expira en 30 minutos.</p>`
                      }).catch(e => console.error("SMTP Err", e));
                  }
                  return res.status(200).json({ message: 'Usuario pendiente por verificar.', requireVerification: true });
@@ -197,7 +197,7 @@ app.post('/api/register', async (req, res) => {
         }
 
         const code = Math.floor(100000 + Math.random() * 900000).toString();
-        const expires = new Date(Date.now() + 5 * 60 * 1000);
+        const expires = new Date(Date.now() + 30 * 60 * 1000); // 30 minutos
         const newUser = new User({ 
             nombre, apellido, correo, telefono, password, firma, fotoPerfil, 
             isVerified: false, 
@@ -206,11 +206,11 @@ app.post('/api/register', async (req, res) => {
         });
         await newUser.save();
 
-        await transporter.sendMail({
+        transporter.sendMail({
             from: '"Soporte Naisata" <naisata81@gmail.com>',
             to: correo,
             subject: 'Verifica tu cuenta - Naisata Platform',
-            html: `<h2>Código de Verificación Naisata</h2><p>Tu código es: <b style="font-size:24px; color:#2ecc71;">${code}</b></p><p>Este código expira en 5 minutos.</p>`
+            html: `<h2>Código de Verificación Naisata</h2><p>Tu código es: <b style="font-size:24px; color:#2ecc71;">${code}</b></p><p>Este código expira en 30 minutos.</p>`
         }).catch(e => console.error("SMTP Err", e));
 
         res.status(201).json({ message: 'Usuario registrado. Se requiere verificación.', requireVerification: true });
@@ -263,14 +263,14 @@ app.post('/api/resend-code', async (req, res) => {
 
         const code = Math.floor(100000 + Math.random() * 900000).toString();
         user.verificationCode = code;
-        user.verificationCodeExpires = new Date(Date.now() + 5 * 60 * 1000);
+        user.verificationCodeExpires = new Date(Date.now() + 30 * 60 * 1000); // 30 minutos
         await user.save();
 
-        await transporter.sendMail({
+        transporter.sendMail({
             from: '"Soporte Naisata" <naisata81@gmail.com>',
             to: correo,
             subject: 'Nuevo Código de Verificación - Naisata Platform',
-            html: `<h2>Código de Verificación Naisata</h2><p>Tu nuevo código es: <b style="font-size:24px; color:#2ecc71;">${code}</b></p><p>Este código expira en 5 minutos.</p>`
+            html: `<h2>Código de Verificación Naisata</h2><p>Tu nuevo código es: <b style="font-size:24px; color:#2ecc71;">${code}</b></p><p>Este código expira en 30 minutos.</p>`
         }).catch(e => console.error("SMTP Err", e));
 
         res.status(200).json({ message: 'Código reenviado correctamente.' });
@@ -361,17 +361,17 @@ app.post('/api/login', async (req, res) => {
             if (!codeToSend || !user.verificationCodeExpires || now > user.verificationCodeExpires) {
                 codeToSend = Math.floor(100000 + Math.random() * 900000).toString();
                 user.verificationCode = codeToSend;
-                user.verificationCodeExpires = new Date(now.getTime() + 5 * 60 * 1000);
+                user.verificationCodeExpires = new Date(now.getTime() + 30 * 60 * 1000); // 30 minutos
                 user.isVerified = false;
                 await user.save();
             }
 
             // SIEMPRE que de clíck en Login, le mandamos o re-mandamos el código activo actual a su correo por si no lo vio.
-            await transporter.sendMail({
+            transporter.sendMail({
                 from: '"Soporte Naisata" <naisata81@gmail.com>',
                 to: correo,
                 subject: 'Verifica tu cuenta - Naisata Platform',
-                html: `<h2>Código de Verificación Naisata</h2><p>Tu código es: <b style="font-size:24px; color:#2ecc71;">${codeToSend}</b></p><p>Este código es válido por 5 minutos antes de expirar.</p>`
+                html: `<h2>Código de Verificación Naisata</h2><p>Tu código es: <b style="font-size:24px; color:#2ecc71;">${codeToSend}</b></p><p>Este código es válido por 30 minutos antes de expirar.</p>`
             }).catch(e => console.error("SMTP Err Login:", e));
 
             return res.status(403).json({ error: 'REQUIRE_VERIFICATION', requireVerification: true });
