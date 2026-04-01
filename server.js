@@ -219,6 +219,25 @@ app.put('/api/users/:id/schedule', async (req, res) => {
     }
 });
 
+// 1.3.1 Restablecer Contraseña (Para Admin)
+app.put('/api/users/:id/reset-password', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { newPassword } = req.body;
+        if (!newPassword) return res.status(400).json({ error: 'La nueva contraseña es requerida.' });
+
+        const user = await User.findById(id);
+        if (!user) return res.status(404).json({ error: 'Usuario no encontrado.' });
+
+        user.password = newPassword;
+        await user.save();
+        
+        res.json({ message: 'Contraseña actualizada correctamente.' });
+    } catch (e) {
+        res.status(500).json({ error: 'Error actualizando contraseña.' });
+    }
+});
+
 // 1.4 Actualizar Foto de Perfil
 app.put('/api/users/:id/photo', async (req, res) => {
     try {
@@ -515,7 +534,7 @@ app.get('/api/tickets/full/:id', async (req, res) => {
         const ticketId = req.params.id;
         const ticket = await Ticket.findById(ticketId);
         if (!ticket) return res.status(404).json({ error: 'Ticket no encontrado.' });
-        
+
         const obj = ticket.toObject();
         obj.id = ticket._id.toString();
         res.json(obj);
@@ -703,7 +722,7 @@ app.delete('/api/tickets/:id', async (req, res) => {
         const ticketId = req.params.id;
         const ticket = await Ticket.findByIdAndDelete(ticketId);
         if (!ticket) return res.status(404).json({ error: 'Ticket no encontrado.' });
-        
+
         io.emit('delete_ticket', ticketId);
         res.status(200).json({ message: 'Ticket eliminado con éxito' });
     } catch (e) {
@@ -1053,7 +1072,7 @@ app.delete('/api/plans/:id', async (req, res) => {
         const { id } = req.params;
         const deletedPlan = await PlanModel.findByIdAndDelete(id);
         if (!deletedPlan) return res.status(404).json({ error: 'Plano no encontrado.' });
-        
+
         await PlanMarker.deleteMany({ planId: id });
         io.emit('deleted_plan', { id });
         res.json({ message: 'Plano eliminado correctamente' });
@@ -1096,7 +1115,7 @@ app.put('/api/markers/:id', async (req, res) => {
     try {
         const markerId = req.params.id;
         const { estado, notas } = req.body;
-        
+
         const marker = await PlanMarker.findById(markerId);
         if (!marker) return res.status(404).json({ error: 'Marcador no encontrado.' });
 
@@ -1117,7 +1136,7 @@ app.delete('/api/markers/:id', async (req, res) => {
         const markerId = req.params.id;
         const deletedMarker = await PlanMarker.findByIdAndDelete(markerId);
         if (!deletedMarker) return res.status(404).json({ error: 'Marcador no encontrado.' });
-        
+
         io.emit('delete_marker', markerId);
         res.json({ message: 'Marcador eliminado.' });
     } catch (e) {
