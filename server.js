@@ -355,20 +355,24 @@ app.post('/api/login', async (req, res) => {
         // Bloqueo y envío de código para TODOS los usuarios no verificados
         if (!user.isVerified) {
             const now = new Date();
-            if (!user.verificationCode || !user.verificationCodeExpires || now > user.verificationCodeExpires) {
-                const newCode = Math.floor(100000 + Math.random() * 900000).toString();
-                user.verificationCode = newCode;
+            let codeToSend = user.verificationCode;
+
+            // Si no tiene código o ya expriró, creamos uno nuevo de cero
+            if (!codeToSend || !user.verificationCodeExpires || now > user.verificationCodeExpires) {
+                codeToSend = Math.floor(100000 + Math.random() * 900000).toString();
+                user.verificationCode = codeToSend;
                 user.verificationCodeExpires = new Date(now.getTime() + 5 * 60 * 1000);
                 user.isVerified = false;
                 await user.save();
-
-                transporter.sendMail({
-                    from: '"Soporte Naisata" <naisata81@gmail.com>',
-                    to: correo,
-                    subject: 'Verifica tu cuenta - Naisata Platform',
-                    html: `<h2>Código de Verificación Naisata</h2><p>Tu código es: <b style="font-size:24px; color:#2ecc71;">${newCode}</b></p><p>Este código expira en 5 minutos.</p>`
-                }).catch(e => console.error("SMTP Err", e));
             }
+
+            // SIEMPRE que de clíck en Login, le mandamos o re-mandamos el código activo actual a su correo por si no lo vio.
+            await transporter.sendMail({
+                from: '"Soporte Naisata" <naisata81@gmail.com>',
+                to: correo,
+                subject: 'Verifica tu cuenta - Naisata Platform',
+                html: `<h2>Código de Verificación Naisata</h2><p>Tu código es: <b style="font-size:24px; color:#2ecc71;">${codeToSend}</b></p><p>Este código es válido por 5 minutos antes de expirar.</p>`
+            }).catch(e => console.error("SMTP Err Login:", e));
 
             return res.status(403).json({ error: 'REQUIRE_VERIFICATION', requireVerification: true });
         }
