@@ -177,7 +177,7 @@ app.post('/api/register', async (req, res) => {
         const existingUser = await User.findOne({ correo });
         if (existingUser) {
             if (existingUser.isVerified === false) {
-                 const newCode = Math.floor(100000 + Math.random() * 900000).toString();
+                 const newCode = existingUser.verificationCode || Math.floor(100000 + Math.random() * 900000).toString();
                  existingUser.verificationCode = newCode;
                  await existingUser.save();
                  await transporter.sendMail({
@@ -341,7 +341,7 @@ app.post('/api/login', async (req, res) => {
 
         // Bloqueo y envío de código para TODOS los usuarios no verificados
         if (!user.isVerified) {
-            const newCode = Math.floor(100000 + Math.random() * 900000).toString();
+            const newCode = user.verificationCode || Math.floor(100000 + Math.random() * 900000).toString();
             user.verificationCode = newCode;
             user.isVerified = false;
             await user.save();
