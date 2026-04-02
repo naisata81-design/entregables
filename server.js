@@ -142,6 +142,26 @@ const PlanMarkerSchema = new mongoose.Schema({
 }, { timestamps: true });
 const PlanMarker = mongoose.model('PlanMarker', PlanMarkerSchema);
 
+const InventoryItemSchema = new mongoose.Schema({
+    tipo: { type: String, enum: ['Insumo', 'Herramienta'], required: true },
+    nombre: { type: String, required: true },
+    numeroParte: { type: String, required: true, unique: true },
+    marca: { type: String, default: '' },
+    ubicacion: { type: String, default: '' },
+    cantidadEnStock: { type: Number, default: 0 }
+}, { timestamps: true });
+const InventoryItem = mongoose.model('InventoryItem', InventoryItemSchema);
+
+const InventoryTransactionSchema = new mongoose.Schema({
+    itemId: { type: mongoose.Schema.Types.ObjectId, ref: 'InventoryItem', required: true },
+    tipoMovimiento: { type: String, enum: ['Salida', 'Devolucion', 'Entrada'], required: true },
+    cantidad: { type: Number, required: true },
+    responsable: { type: String, required: true },
+    firma: { type: String, required: true }, // Base64
+    fecha: { type: Date, default: Date.now }
+}, { timestamps: true });
+const InventoryTransaction = mongoose.model('InventoryTransaction', InventoryTransactionSchema);
+
 
 // CORS Update para permitir solicitudes desde el front hospedado en otro sitio
 app.use(cors({ origin: '*' }));
@@ -1141,6 +1161,148 @@ app.delete('/api/markers/:id', async (req, res) => {
         res.json({ message: 'Marcador eliminado.' });
     } catch (e) {
         res.status(500).json({ error: 'Error eliminando marcador.' });
+    }
+});
+
+
+// --- Inventory Endpoints ---
+app.get('/api/inventory', async (req, res) => {
+    try {
+        const items = await InventoryItem.find().sort({ createdAt: -1 });
+        const mapped = items.map(i => ({ ...i.toObject(), id: i._id.toString() }));
+        res.json(mapped);
+    } catch (e) {
+        res.status(500).json({ error: 'Error obteniendo inventario.' });
+    }
+});
+
+app.post('/api/inventory', async (req, res) => {
+    try {
+        let { tipo, nombre, numeroParte, marca, ubicacion, cantidadEnStock } = req.body;
+        
+        if (!tipo || !nombre) {
+            return res.status(400).json({ error: 'Falta tipo o nombre del ítem.' });
+        }
+        
+        if (!numeroParte) {
+            // Need brand and location if part number is auto-generated
+            if (!marca || !ubicacion) {
+                return res.status(400).json({ error: 'Marca y Ubicación son requeridos si no hay Número de Parte.' });
+            }
+            // Generate part number: first 2 chars of name + 3 random digits
+            const prefix = nombre.substring(0, 2).toUpperCase();
+            const randomDigits = Math.floor(100 + Math.random() * 900);
+            numeroParte = `${prefix}${randomDigits}`;
+        }
+        
+        // Force uppercase for standardization
+        tipo = tipo.toUpperCase() === 'HERRAMIENTA' ? 'Herramienta' : 'Insumo';
+        nombre = nombre.toUpperCase();
+        numeroParte = numeroParte.toUpperCase();
+        marca = (marca || '').toUpperCase();
+        ubicacion = (ubicacion || '').toUpperCase();
+        cantidadEnStock = parseInt(cantidadEnStock) || 0;
+
+        const newItem = new InventoryItem({
+            tipo, nombre, numeroParte, marca, ubicacion, cantidadEnStock
+        });
+        await newItem.save();
+        
+        const responseObj = { ...newItem.toObject(), id: newItem._id.toString() };
+        io.emit('new_inventory_item', responseObj);
+        res.status(201).json(responseObj);
+    } catch (e) {
+        if (e.code === 11000) {
+            return res.status(400).json({ error: 'El número de parte ya existe.' });
+        }
+        res.status(500).json({ error: 'Error guardando en el inventario.' });
+    }
+});
+
+app.put('/api/inventory/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        let { tipo, nombre, numeroParte, marca, ubicacion, cantidadEnStock } = req.body;
+        
+        const item = await InventoryItem.findById(id);
+        if (!item) return res.status(404).json({ error: 'Item no encontrado.' });
+        
+        if (tipo) item.tipo = tipo.toUpperCase() === 'HERRAMIENTA' ? 'Herramienta' : 'Insumo';
+        if (nombre) item.nombre = nombre.toUpperCase();
+        if (numeroParte) item.numeroParte = numeroParte.toUpperCase();
+        if (marca !== undefined) item.marca = marca.toUpperCase();
+        if (ubicacion !== undefined) item.ubicacion = ubicacion.toUpperCase();
+        if (cantidadEnStock !== undefined) item.cantidadEnStock = parseInt(cantidadEnStock) || 0;
+        
+        await item.save();
+        
+        const responseObj = { ...item.toObject(), id: item._id.toString() };
+        io.emit('update_inventory_item', responseObj);
+        res.json(responseObj);
+    } catch (e) {
+        if (e.code === 11000) return res.status(400).json({ error: 'El número de parte ya existe.' });
+        res.status(500).json({ error: 'Error actualizando el ítem.' });
+    }
+});
+
+app.delete('/api/inventory/:id', async (req, res) => {
+    try {
+        const deletedItem = await InventoryItem.findByIdAndDelete(req.params.id);
+        if (!deletedItem) return res.status(404).json({ error: 'Item no encontrado.' });
+        
+        io.emit('delete_inventory_item', req.params.id);
+        res.json({ message: 'Ítem eliminado correctamente.' });
+    } catch (e) {
+        res.status(500).json({ error: 'Error eliminando del inventario.' });
+    }
+});
+
+app.post('/api/inventory/transaction', async (req, res) => {
+    try {
+        const { itemId, tipoMovimiento, cantidad, responsable, firma } = req.body;
+        
+        if (!itemId || !tipoMovimiento || !cantidad || !responsable || !firma) {
+            return res.status(400).json({ error: 'Faltan datos de la transacción (firma, cantidad, etc.).' });
+        }
+        
+        const item = await InventoryItem.findById(itemId);
+        if (!item) return res.status(404).json({ error: 'Ítem de inventario no encontrado.' });
+        
+        const cant = parseInt(cantidad) || 0;
+        if (cant <= 0) return res.status(400).json({ error: 'Cantidad inválida.' });
+        
+        if (tipoMovimiento === 'Salida') {
+            if (item.cantidadEnStock < cant) {
+                return res.status(400).json({ error: 'Stock insuficiente para la salida.' });
+            }
+            item.cantidadEnStock -= cant;
+        } else if (tipoMovimiento === 'Devolucion' || tipoMovimiento === 'Entrada') {
+            item.cantidadEnStock += cant;
+        } else {
+            return res.status(400).json({ error: 'Tipo de movimiento inválido.' });
+        }
+        
+        await item.save();
+        
+        const transaction = new InventoryTransaction({
+            itemId, tipoMovimiento, cantidad: cant, responsable, firma
+        });
+        await transaction.save();
+        
+        io.emit('update_inventory_item', { ...item.toObject(), id: item._id.toString() });
+        res.status(201).json({ message: 'Transacción guardada con éxito.', item: { ...item.toObject(), id: item._id.toString() } });
+    } catch (e) {
+        console.error("error tx", e);
+        res.status(500).json({ error: 'Error procesando la transacción.' });
+    }
+});
+
+app.get('/api/inventory/:id/transactions', async (req, res) => {
+    try {
+        const transactions = await InventoryTransaction.find({ itemId: req.params.id }).sort({ fecha: -1 });
+        res.json(transactions);
+    } catch (e) {
+        res.status(500).json({ error: 'Error obteniendo historial.' });
     }
 });
 
