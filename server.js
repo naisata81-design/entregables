@@ -148,7 +148,15 @@ const InventoryItemSchema = new mongoose.Schema({
     numeroParte: { type: String, required: true, unique: true },
     marca: { type: String, default: '' },
     ubicacion: { type: String, default: '' },
-    cantidadEnStock: { type: Number, default: 0 }
+    cantidadDescompuesta: { type: Number, default: 0 },
+    historialFallas: [{
+        fecha: { type: Date, default: Date.now },
+        reportadoPor: String,
+        falla: String,
+        cantidad: Number,
+        solucionado: { type: Boolean, default: false },
+        fechaSolucion: Date
+    }]
 }, { timestamps: true });
 const InventoryItem = mongoose.model('InventoryItem', InventoryItemSchema);
 
@@ -1345,6 +1353,78 @@ app.delete('/api/inventory/:id', async (req, res) => {
         res.json({ message: 'Ítem eliminado correctamente.' });
     } catch (e) {
         res.status(500).json({ error: 'Error eliminando del inventario.' });
+    }
+});
+
+app.post('/api/inventory/:id/report-broken', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { cantidad, reportadoPor, falla } = req.body;
+        
+        const cant = parseInt(cantidad) || 1;
+
+        const item = await InventoryItem.findById(id);
+        if (!item) return res.status(404).json({ error: 'Item no encontrado.' });
+        
+        if (item.cantidadEnStock < cant) {
+             return res.status(400).json({ error: 'No hay suficiente stock para marcar esta cantidad como descompuesta.' });
+        }
+        
+        item.cantidadEnStock -= cant;
+        item.cantidadDescompuesta += cant;
+        item.historialFallas.push({
+             reportadoPor: reportadoPor || 'Desconocido',
+             falla: falla || 'Sin descripción',
+             cantidad: cant,
+             fecha: new Date(),
+             solucionado: false
+        });
+        
+        await item.save();
+        
+        const responseObj = { ...item.toObject(), id: item._id.toString() };
+        io.emit('update_inventory_item', responseObj);
+        res.status(200).json({ message: 'Falla reportada con éxito.', item: responseObj });
+    } catch (e) {
+        console.error("Error reportando falla", e);
+        res.status(500).json({ error: 'Error reportando la falla.' });
+    }
+});
+
+app.post('/api/inventory/:id/repair', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { adminId, fallaId } = req.body;
+        
+        const adminUser = await User.findById(adminId);
+        if (!adminUser || adminUser.rol !== 'admin') {
+             return res.status(403).json({ error: 'Solo los administradores pueden marcar herramientas como reparadas.' });
+        }
+        
+        const item = await InventoryItem.findById(id);
+        if (!item) return res.status(404).json({ error: 'Item no encontrado.' });
+        
+        const incident = item.historialFallas.id(fallaId);
+        if (!incident) return res.status(404).json({ error: 'Incidente no encontrado.' });
+        if (incident.solucionado) return res.status(400).json({ error: 'El incidente ya fue solucionado.' });
+        
+        incident.solucionado = true;
+        incident.fechaSolucion = new Date();
+        
+        const cantToRepair = incident.cantidad || 1;
+        item.cantidadDescompuesta -= cantToRepair;
+        item.cantidadEnStock += cantToRepair;
+        
+        if (item.cantidadDescompuesta < 0) item.cantidadDescompuesta = 0;
+        
+        await item.save();
+        
+        const responseObj = { ...item.toObject(), id: item._id.toString() };
+        io.emit('update_inventory_item', responseObj);
+        res.status(200).json({ message: 'Herramienta marcada como reparada.', item: responseObj });
+    } catch (e) {
+        console.error("Error reparando falla", e);
+        res.status(500).json({ error: 'Error marcando como reparada.' });
     }
 });
 
