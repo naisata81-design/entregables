@@ -1422,6 +1422,40 @@ app.get('/api/inventory/:id/transactions', async (req, res) => {
     }
 });
 
+app.get('/api/inventory/loans/:responsable', async (req, res) => {
+    try {
+        const { responsable } = req.params;
+        // Match the exact string of the selected user or entered "OTRO" name
+        const transactions = await InventoryTransaction.find({ responsable: responsable }).populate('itemId');
+        
+        const countMap = {};
+        for (const t of transactions) {
+            if (t.itemId) {
+                const idStr = t.itemId._id.toString();
+                if (!countMap[idStr]) {
+                    countMap[idStr] = {
+                        item: { 
+                            id: idStr, 
+                            nombre: t.itemId.nombre, 
+                            numeroParte: t.itemId.numeroParte,
+                            tipo: t.itemId.tipo,
+                            cantidadEnStock: t.itemId.cantidadEnStock
+                        },
+                        cantidad: 0 // Net loaned quantity
+                    };
+                }
+                if (t.tipoMovimiento === 'Salida') countMap[idStr].cantidad += t.cantidad;
+                else if (t.tipoMovimiento === 'Devolucion') countMap[idStr].cantidad -= t.cantidad;
+            }
+        }
+        
+        const activeLoans = Object.values(countMap).filter(v => v.cantidad > 0);
+        res.json(activeLoans);
+    } catch (e) {
+        console.error("Error obteniendo prestamos: ", e);
+        res.status(500).json({ error: 'Error obteniendo préstamos activos.' });
+    }
+});
 
 server.listen(PORT, '0.0.0.0', () => {
     console.log(`Servidor API ejecutándose en el puerto ${PORT}`);
