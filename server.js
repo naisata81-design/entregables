@@ -219,6 +219,95 @@ app.get('/api/users/:id', async (req, res) => {
     }
 });
 
+// 1.2.2 Obtener Estadísticas de Empleado (Dashboard)
+app.get('/api/users/:id/dashboard-stats', async (req, res) => {
+    try {
+        const userId = req.params.id;
+        const user = await User.findById(userId).select('nombre apellido diasVacacionesDisponibles horariosPorDia usaHorarioPersonalizado rol');
+        if (!user) return res.status(404).json({ error: 'Usuario no encontrado.' });
+
+        const fullName = `${user.nombre} ${user.apellido}`;
+
+        // 1. Calcular retardos históricos
+        const checkins = await CheckIn.find({ userId: userId, tipo: 'Entrada' });
+        let settings = await Settings.findOne({ tipo: 'timeclock' });
+        const globalTolerancia = settings ? settings.toleranciaMinutos : 15;
+        const globalHorarios = settings ? settings.horariosPorDia : [];
+
+        let retardosTotales = 0;
+        for (const checkin of checkins) {
+            const date = new Date(checkin.timestamp);
+            const dayOfWeek = date.getDay();
+            let horarioDia;
+            if (user.usaHorarioPersonalizado && user.horariosPorDia) {
+                horarioDia = user.horariosPorDia.find(h => h.dia === dayOfWeek);
+            } else {
+                horarioDia = globalHorarios.find(h => h.dia === dayOfWeek);
+            }
+
+            if (horarioDia && horarioDia.activo && horarioDia.entrada) {
+                const [h, m] = horarioDia.entrada.split(':').map(Number);
+                const entryTimeMinutes = h * 60 + m;
+                const checkinTimeMinutes = date.getHours() * 60 + date.getMinutes();
+                if (checkinTimeMinutes > (entryTimeMinutes + globalTolerancia)) {
+                    retardosTotales++;
+                }
+            }
+        }
+
+        // 2. Calcular herramientas prestadas al empleado (Inventario Actual)
+        const transactions = await InventoryTransaction.find({ responsable: fullName }).populate('itemId');
+        const countMap = {}; // itemId -> net quantity
+
+        for (const t of transactions) {
+            if (t.itemId && t.itemId.tipo === 'Herramienta') {
+                const idStr = t.itemId._id.toString();
+                if (!countMap[idStr]) {
+                    countMap[idStr] = {
+                        item: { id: idStr, nombre: t.itemId.nombre, numeroParte: t.itemId.numeroParte },
+                        cantidad: 0
+                    };
+                }
+                if (t.tipoMovimiento === 'Salida') {
+                    countMap[idStr].cantidad += t.cantidad;
+                } else if (t.tipoMovimiento === 'Devolucion') {
+                    countMap[idStr].cantidad -= t.cantidad;
+                }
+            }
+        }
+
+        const herramientasActuales = Object.values(countMap).filter(v => v.cantidad > 0);
+
+        // 3. Historial de una Semana
+        const sevenDaysAgo = new Date();
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+        const weeklyTransactionsRaw = await InventoryTransaction.find({ 
+            responsable: fullName,
+            fecha: { $gte: sevenDaysAgo }
+        }).sort({ fecha: -1 }).populate('itemId');
+
+        const weeklyHistory = weeklyTransactionsRaw.filter(t => t.itemId && t.itemId.tipo === 'Herramienta').map(t => ({
+            id: t._id.toString(),
+            tipoMovimiento: t.tipoMovimiento,
+            cantidad: t.cantidad,
+            fecha: t.fecha,
+            itemNombre: t.itemId.nombre,
+            itemNumeroParte: t.itemId.numeroParte
+        }));
+
+        res.json({
+            diasVacacionesDisponibles: user.diasVacacionesDisponibles,
+            retardosTotales,
+            herramientasActuales,
+            weeklyHistory
+        });
+
+    } catch (e) {
+        console.error('Error calculando stats de dashboard:', e);
+        res.status(500).json({ error: 'Error calculando estadisticas del empleado.' });
+    }
+});
+
 // 1.3 Asignar Horario Personalizado y Vacaciones (Para Admin)
 app.put('/api/users/:id/schedule', async (req, res) => {
     try {
@@ -1259,41 +1348,66 @@ app.delete('/api/inventory/:id', async (req, res) => {
 
 app.post('/api/inventory/transaction', async (req, res) => {
     try {
-        const { itemId, tipoMovimiento, cantidad, responsable, firma } = req.body;
-        
-        if (!itemId || !tipoMovimiento || !cantidad || !responsable || !firma) {
-            return res.status(400).json({ error: 'Faltan datos de la transacción (firma, cantidad, etc.).' });
+        const { tipoMovimiento, responsable, firma } = req.body;
+        // Support both old format { itemId, cantidad } and new array format { items: [{itemId, cantidad}] }
+        let itemsArr = req.body.items;
+        if (!itemsArr && req.body.itemId && req.body.cantidad) {
+            itemsArr = [{ itemId: req.body.itemId, cantidad: req.body.cantidad }];
         }
         
-        const item = await InventoryItem.findById(itemId);
-        if (!item) return res.status(404).json({ error: 'Ítem de inventario no encontrado.' });
+        if (!itemsArr || !itemsArr.length || !tipoMovimiento || !responsable || !firma) {
+            return res.status(400).json({ error: 'Faltan datos de la transacción (firma, artículos, responsable).' });
+        }
         
-        const cant = parseInt(cantidad) || 0;
-        if (cant <= 0) return res.status(400).json({ error: 'Cantidad inválida.' });
-        
-        if (tipoMovimiento === 'Salida') {
-            if (item.cantidadEnStock < cant) {
-                return res.status(400).json({ error: 'Stock insuficiente para la salida.' });
+        // 1. Initial Validation of all items
+        const itemDocs = [];
+        const quantities = [];
+        for (let i = 0; i < itemsArr.length; i++) {
+            const { itemId, cantidad } = itemsArr[i];
+            const cant = parseInt(cantidad) || 0;
+            if (cant <= 0) return res.status(400).json({ error: 'Cantidad inválida para uno de los artículos.' });
+            
+            const item = await InventoryItem.findById(itemId);
+            if (!item) return res.status(404).json({ error: `Ítem no encontrado (ID: ${itemId}).` });
+            
+            if (tipoMovimiento === 'Salida' && item.cantidadEnStock < cant) {
+                return res.status(400).json({ error: `Stock insuficiente para la salida del artículo: ${item.nombre}.` });
             }
-            item.cantidadEnStock -= cant;
-        } else if (tipoMovimiento === 'Devolucion' || tipoMovimiento === 'Entrada') {
-            item.cantidadEnStock += cant;
-        } else {
-            return res.status(400).json({ error: 'Tipo de movimiento inválido.' });
+            if (tipoMovimiento !== 'Salida' && tipoMovimiento !== 'Devolucion' && tipoMovimiento !== 'Entrada') {
+                return res.status(400).json({ error: 'Tipo de movimiento inválido.' });
+            }
+            itemDocs.push(item);
+            quantities.push(cant);
         }
         
-        await item.save();
+        // 2. Perform updates and create transactions
+        const responseItems = [];
+        for (let i = 0; i < itemDocs.length; i++) {
+            const item = itemDocs[i];
+            const cant = quantities[i];
+            
+            if (tipoMovimiento === 'Salida') {
+                item.cantidadEnStock -= cant;
+            } else {
+                item.cantidadEnStock += cant;
+            }
+            
+            await item.save();
+            
+            const transaction = new InventoryTransaction({
+                itemId: item._id, tipoMovimiento, cantidad: cant, responsable, firma
+            });
+            await transaction.save();
+            
+            const formattedItem = { ...item.toObject(), id: item._id.toString() };
+            responseItems.push(formattedItem);
+            io.emit('update_inventory_item', formattedItem);
+        }
         
-        const transaction = new InventoryTransaction({
-            itemId, tipoMovimiento, cantidad: cant, responsable, firma
-        });
-        await transaction.save();
-        
-        io.emit('update_inventory_item', { ...item.toObject(), id: item._id.toString() });
-        res.status(201).json({ message: 'Transacción guardada con éxito.', item: { ...item.toObject(), id: item._id.toString() } });
+        res.status(201).json({ message: 'Transacción multi-ítem guardada con éxito.', items: responseItems });
     } catch (e) {
         console.error("error tx", e);
-        res.status(500).json({ error: 'Error procesando la transacción.' });
+        res.status(500).json({ error: 'Error procesando la transacción multi-ítem.' });
     }
 });
 
