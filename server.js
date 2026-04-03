@@ -155,7 +155,8 @@ const InventoryItemSchema = new mongoose.Schema({
         falla: String,
         cantidad: Number,
         solucionado: { type: Boolean, default: false },
-        fechaSolucion: Date
+        fechaSolucion: Date,
+        enCampo: { type: Boolean, default: false }
     }]
 }, { timestamps: true });
 const InventoryItem = mongoose.model('InventoryItem', InventoryItemSchema);
@@ -1359,25 +1360,28 @@ app.delete('/api/inventory/:id', async (req, res) => {
 app.post('/api/inventory/:id/report-broken', async (req, res) => {
     try {
         const { id } = req.params;
-        const { cantidad, reportadoPor, falla } = req.body;
+        const { cantidad, reportadoPor, falla, enCampo } = req.body;
         
         const cant = parseInt(cantidad) || 1;
 
         const item = await InventoryItem.findById(id);
         if (!item) return res.status(404).json({ error: 'Item no encontrado.' });
         
-        if (item.cantidadEnStock < cant) {
-             return res.status(400).json({ error: 'No hay suficiente stock para marcar esta cantidad como descompuesta.' });
+        if (!enCampo) {
+            if (item.cantidadEnStock < cant) {
+                 return res.status(400).json({ error: 'No hay suficiente stock para marcar esta cantidad como descompuesta.' });
+            }
+            item.cantidadEnStock -= cant;
+            item.cantidadDescompuesta += cant;
         }
-        
-        item.cantidadEnStock -= cant;
-        item.cantidadDescompuesta += cant;
+
         item.historialFallas.push({
              reportadoPor: reportadoPor || 'Desconocido',
              falla: falla || 'Sin descripción',
              cantidad: cant,
              fecha: new Date(),
-             solucionado: false
+             solucionado: false,
+             enCampo: !!enCampo
         });
         
         await item.save();
@@ -1412,10 +1416,12 @@ app.post('/api/inventory/:id/repair', async (req, res) => {
         incident.fechaSolucion = new Date();
         
         const cantToRepair = incident.cantidad || 1;
-        item.cantidadDescompuesta -= cantToRepair;
-        item.cantidadEnStock += cantToRepair;
         
-        if (item.cantidadDescompuesta < 0) item.cantidadDescompuesta = 0;
+        if (!incident.enCampo) {
+            item.cantidadDescompuesta -= cantToRepair;
+            item.cantidadEnStock += cantToRepair;
+            if (item.cantidadDescompuesta < 0) item.cantidadDescompuesta = 0;
+        }
         
         await item.save();
         
