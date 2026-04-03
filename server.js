@@ -1594,7 +1594,8 @@ app.get('/api/inventory/loans/:responsable', async (req, res) => {
                             nombre: t.itemId.nombre, 
                             numeroParte: t.itemId.numeroParte,
                             tipo: t.itemId.tipo,
-                            cantidadEnStock: t.itemId.cantidadEnStock
+                            cantidadEnStock: t.itemId.cantidadEnStock,
+                            historialFallas: t.itemId.historialFallas || []
                         },
                         cantidad: 0 // Net loaned quantity
                     };
