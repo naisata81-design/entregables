@@ -1417,7 +1417,20 @@ app.post('/api/inventory/:id/repair', async (req, res) => {
         
         const cantToRepair = incident.cantidad || 1;
         
-        if (!incident.enCampo) {
+        if (incident.enCampo) {
+            // Falla en campo reportada desde el botón rápido: la herramienta seguía físicamente a cargo del empleado.
+            // Al repararla el admin asume que ha regresado a manos de la empresa.
+            // Auto-generamos la transacción de Devolución para saldar su adeudo.
+            const tx = new InventoryTransaction({
+                itemId: item._id,
+                tipoMovimiento: 'Devolucion',
+                cantidad: cantToRepair,
+                responsable: incident.reportadoPor || 'Admin (Cierre Forzado)',
+                firma: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='
+            });
+            await tx.save();
+            item.cantidadEnStock += cantToRepair;
+        } else {
             item.cantidadDescompuesta -= cantToRepair;
             item.cantidadEnStock += cantToRepair;
             if (item.cantidadDescompuesta < 0) item.cantidadDescompuesta = 0;
