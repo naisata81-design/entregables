@@ -273,7 +273,9 @@ app.get('/api/users/:id', async (req, res) => {
     try {
         const user = await User.findById(req.params.id).select('-password -firma');
         if (!user) return res.status(404).json({ error: 'Usuario no encontrado.' });
-        res.json(user);
+        const userObj = user.toObject();
+        userObj.diasVacacionesDisponibles = await calcularVacacionesDinamicamente(user);
+        res.json(userObj);
     } catch (e) {
         res.status(500).json({ error: 'Error obteniendo al usuario.' });
     }
@@ -283,7 +285,7 @@ app.get('/api/users/:id', async (req, res) => {
 app.get('/api/users/:id/dashboard-stats', async (req, res) => {
     try {
         const userId = req.params.id;
-        const user = await User.findById(userId).select('nombre apellido diasVacacionesDisponibles horariosPorDia usaHorarioPersonalizado rol');
+        const user = await User.findById(userId).select('nombre apellido diasVacacionesDisponibles horariosPorDia usaHorarioPersonalizado rol fechaIngreso');
         if (!user) return res.status(404).json({ error: 'Usuario no encontrado.' });
 
         const fullName = `${user.nombre} ${user.apellido}`;
@@ -459,7 +461,10 @@ app.post('/api/login', async (req, res) => {
             return res.status(403).json({ error: 'REQUIRE_PHOTO_SETUP' });
         }
 
-        res.status(200).json({ message: 'Inicio de sesión exitoso', user });
+        const userObj = user.toObject();
+        userObj.diasVacacionesDisponibles = await calcularVacacionesDinamicamente(user);
+
+        res.status(200).json({ message: 'Inicio de sesión exitoso', user: userObj });
     } catch (e) {
         res.status(500).json({ error: 'Error interno en login.' });
     }
