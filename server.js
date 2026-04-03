@@ -256,7 +256,9 @@ app.get('/api/users/:id/dashboard-stats', async (req, res) => {
         }
 
         // 2. Calcular herramientas prestadas al empleado (Inventario Actual)
-        const transactions = await InventoryTransaction.find({ responsable: fullName }).populate('itemId');
+        const transactions = await InventoryTransaction.find({ 
+            responsable: { $in: [fullName, user.nombre, user.nombre.trim()] } 
+        }).populate('itemId');
         const countMap = {}; // itemId -> net quantity
 
         for (const t of transactions) {
@@ -282,7 +284,7 @@ app.get('/api/users/:id/dashboard-stats', async (req, res) => {
         const sevenDaysAgo = new Date();
         sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
         const weeklyTransactionsRaw = await InventoryTransaction.find({ 
-            responsable: fullName,
+            responsable: { $in: [fullName, user.nombre, user.nombre.trim()] },
             fecha: { $gte: sevenDaysAgo }
         }).sort({ fecha: -1 }).populate('itemId');
 
