@@ -227,7 +227,7 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads'))); // Exponer
 // 1. Registro (Register)
 app.post('/api/register', async (req, res) => {
     try {
-        const { nombre, apellido, correo, telefono, password, firma, fotoPerfil } = req.body;
+        const { nombre, apellido, correo, telefono, password, firma, fotoPerfil, fechaIngreso } = req.body;
 
         if (!nombre || !apellido || !correo || !telefono || !password || !firma || !fotoPerfil) {
             return res.status(400).json({ error: 'Todos los campos, foto de perfil y la firma son requeridos.' });
@@ -242,7 +242,7 @@ app.post('/api/register', async (req, res) => {
             return res.status(400).json({ error: 'El correo ya está registrado.' });
         }
 
-        const newUser = new User({ nombre, apellido, correo, telefono, password, firma, fotoPerfil });
+        const newUser = new User({ nombre, apellido, correo, telefono, password, firma, fotoPerfil, fechaIngreso: fechaIngreso || new Date() });
         await newUser.save();
 
         res.status(201).json({ message: 'Usuario registrado exitosamente', user: newUser });
@@ -255,7 +255,14 @@ app.post('/api/register', async (req, res) => {
 app.get('/api/users', async (req, res) => {
     try {
         const users = await User.find().select('-password -firma').sort({ createdAt: -1 });
-        res.json(users);
+        const usersData = [];
+        for (const user of users) {
+             const diasCalc = await calcularVacacionesDinamicamente(user);
+             const userObj = user.toObject();
+             userObj.diasVacacionesDisponibles = diasCalc;
+             usersData.push(userObj);
+        }
+        res.json(usersData);
     } catch (e) {
         res.status(500).json({ error: 'Error obteniendo usuarios.' });
     }
@@ -350,8 +357,10 @@ app.get('/api/users/:id/dashboard-stats', async (req, res) => {
             itemNumeroParte: t.itemId.numeroParte
         }));
 
+        const diasVacacionesDisponiblesCalc = await calcularVacacionesDinamicamente(user);
+
         res.json({
-            diasVacacionesDisponibles: user.diasVacacionesDisponibles,
+            diasVacacionesDisponibles: diasVacacionesDisponiblesCalc,
             retardosTotales,
             herramientasActuales,
             weeklyHistory
@@ -367,13 +376,14 @@ app.get('/api/users/:id/dashboard-stats', async (req, res) => {
 app.put('/api/users/:id/schedule', async (req, res) => {
     try {
         const { id } = req.params;
-        const { usaHorarioPersonalizado, horariosPorDia, diasVacacionesDisponibles, rol } = req.body;
+        const { usaHorarioPersonalizado, horariosPorDia, diasVacacionesDisponibles, rol, fechaIngreso } = req.body;
         const user = await User.findById(id);
         if (!user) return res.status(404).json({ error: 'Usuario no encontrado.' });
 
         if (usaHorarioPersonalizado !== undefined) user.usaHorarioPersonalizado = usaHorarioPersonalizado;
         if (horariosPorDia !== undefined) user.horariosPorDia = horariosPorDia;
         if (diasVacacionesDisponibles !== undefined) user.diasVacacionesDisponibles = diasVacacionesDisponibles;
+        if (fechaIngreso !== undefined) user.fechaIngreso = fechaIngreso;
         if (rol !== undefined && ['admin', 'user', 'Clase C'].includes(rol)) user.rol = rol;
 
         await user.save();
