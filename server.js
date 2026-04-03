@@ -40,6 +40,7 @@ const UserSchema = new mongoose.Schema({
         salida: String
     }],
     diasVacacionesDisponibles: { type: Number, default: 0 },
+    fechaIngreso: { type: Date, default: () => new Date(new Date().getFullYear(), 0, 1) },
     fotoPerfil: { type: String, default: '' }
 }, { timestamps: true });
 const User = mongoose.model('User', UserSchema);
@@ -143,6 +144,7 @@ const PlanMarkerSchema = new mongoose.Schema({
 const PlanMarker = mongoose.model('PlanMarker', PlanMarkerSchema);
 
 const InventoryItemSchema = new mongoose.Schema({
+    cantidadEnStock: { type: Number, default: 0 },
     tipo: { type: String, enum: ['Insumo', 'Herramienta'], required: true },
     nombre: { type: String, required: true },
     numeroParte: { type: String, required: true, unique: true },
@@ -171,6 +173,48 @@ const InventoryTransactionSchema = new mongoose.Schema({
 }, { timestamps: true });
 const InventoryTransaction = mongoose.model('InventoryTransaction', InventoryTransactionSchema);
 
+
+async function calcularVacacionesDinamicamente(user) {
+    if (!user || !user.fechaIngreso) return 0;
+    const hoy = new Date();
+    const ingreso = new Date(user.fechaIngreso);
+    let aniosAntiguedad = hoy.getFullYear() - ingreso.getFullYear();
+    const mesHoy = hoy.getMonth();
+    const diaHoy = hoy.getDate();
+    const mesIngreso = ingreso.getMonth();
+    const diaIngreso = ingreso.getDate();
+    if (mesHoy < mesIngreso || (mesHoy === mesIngreso && diaHoy < diaIngreso)) {
+        aniosAntiguedad--;
+    }
+    let cicloActualInicio = new Date(ingreso);
+    cicloActualInicio.setFullYear(ingreso.getFullYear() + aniosAntiguedad);
+    let diasBase = 0;
+    const diffMeses = (hoy.getFullYear() - ingreso.getFullYear()) * 12 + (hoy.getMonth() - ingreso.getMonth());
+    const exactDiffMeses = diffMeses - (hoy.getDate() < ingreso.getDate() ? 1 : 0);
+
+    if (aniosAntiguedad < 1) {
+        if (exactDiffMeses >= 6) {
+            diasBase = 6;
+            cicloActualInicio = new Date(ingreso);
+            cicloActualInicio.setMonth(ingreso.getMonth() + 6);
+        } else {
+            diasBase = 0;
+        }
+    } else if (aniosAntiguedad === 1) {
+        diasBase = 12;
+    } else {
+        diasBase = 12 + ((aniosAntiguedad - 1) * 2);
+    }
+    if (diasBase === 0) return 0;
+
+    const solicitudesConsumidas = await VacationRequest.find({
+        userId: user._id.toString(),
+        estado: 'aprobada',
+        fechaInicio: { $gte: cicloActualInicio }
+    });
+    const consumidos = solicitudesConsumidas.reduce((acc, curr) => acc + curr.diasSolicitados, 0);
+    return Math.max(0, diasBase - consumidos);
+}
 
 // CORS Update para permitir solicitudes desde el front hospedado en otro sitio
 app.use(cors({ origin: '*' }));
