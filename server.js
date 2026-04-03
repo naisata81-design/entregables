@@ -1406,6 +1406,8 @@ app.post('/api/inventory/transaction', async (req, res) => {
             io.emit('update_inventory_item', formattedItem);
         }
         
+        io.emit('inventory_transactions_updated', { responsable });
+        
         res.status(201).json({ message: 'Transacción multi-ítem guardada con éxito.', items: responseItems });
     } catch (e) {
         console.error("error tx", e);
