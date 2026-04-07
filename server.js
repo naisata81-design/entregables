@@ -362,9 +362,55 @@ app.get('/api/users/:id/dashboard-stats', async (req, res) => {
 
         const diasVacacionesDisponiblesCalc = await calcularVacacionesDinamicamente(user);
 
+        // 4. Calcular faltas históricas
+        let faltasTotales = 0;
+        let listaFaltas = [];
+        const vacacionesAprobadas = await VacationRequest.find({ userId: userId, estado: 'aprobada' });
+        
+        const isVacation = (dateObj) => {
+            return vacacionesAprobadas.some(v => {
+                const start = new Date(v.fechaInicio); start.setHours(0,0,0,0);
+                const end = new Date(v.fechaFin); end.setHours(23,59,59,999);
+                return dateObj >= start && dateObj <= end;
+            });
+        };
+
+        const checkinDates = new Set();
+        for (const c of checkins) {
+            const d = new Date(c.timestamp);
+            checkinDates.add(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`);
+        }
+
+        const hoy = new Date();
+        const ingreso = user.fechaIngreso ? new Date(user.fechaIngreso) : new Date(hoy.getFullYear(), 0, 1);
+        ingreso.setHours(0,0,0,0);
+
+        const ayer = new Date();
+        ayer.setDate(ayer.getDate() - 1);
+        ayer.setHours(23,59,59,999);
+
+        let iterDate = new Date(ingreso);
+        while(iterDate <= ayer) {
+            const dayOfWeek = iterDate.getDay();
+            let horarioDia = (user.usaHorarioPersonalizado && user.horariosPorDia)
+                ? user.horariosPorDia.find(h => h.dia === dayOfWeek)
+                : globalHorarios.find(h => h.dia === dayOfWeek);
+
+            if (horarioDia && horarioDia.activo && horarioDia.entrada) {
+                const tsStr = `${iterDate.getFullYear()}-${String(iterDate.getMonth()+1).padStart(2,'0')}-${String(iterDate.getDate()).padStart(2,'0')}`;
+                if (!checkinDates.has(tsStr) && !isVacation(iterDate)) {
+                    faltasTotales++;
+                    listaFaltas.push(tsStr);
+                }
+            }
+            iterDate.setDate(iterDate.getDate() + 1);
+        }
+
         res.json({
             diasVacacionesDisponibles: diasVacacionesDisponiblesCalc,
             retardosTotales,
+            faltasTotales,
+            listaFaltas,
             herramientasActuales,
             weeklyHistory
         });
