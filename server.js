@@ -480,6 +480,12 @@ app.get('/api/users/:id/dashboard-stats', async (req, res) => {
             iterDate.setDate(iterDate.getDate() + 1);
         }
 
+        if (user.rol === 'socio') {
+            retardosTotales = 0;
+            faltasTotales = 0;
+            listaFaltas = [];
+        }
+
         res.json({
             diasVacacionesDisponibles: diasVacacionesDisponiblesCalc,
             retardosTotales,
@@ -507,7 +513,7 @@ app.put('/api/users/:id/schedule', async (req, res) => {
         if (horariosPorDia !== undefined) user.horariosPorDia = horariosPorDia;
         if (diasVacacionesDisponibles !== undefined) user.diasVacacionesDisponibles = diasVacacionesDisponibles;
         if (fechaIngreso !== undefined) user.fechaIngreso = fechaIngreso;
-        if (rol !== undefined && ['admin', 'user', 'Clase C'].includes(rol)) user.rol = rol;
+        if (rol !== undefined && ['admin', 'user', 'Clase C', 'socio'].includes(rol)) user.rol = rol;
 
         await user.save();
         res.json({ message: 'Ajustes del usuario actualizados', user });
