@@ -41,7 +41,8 @@ const UserSchema = new mongoose.Schema({
     }],
     diasVacacionesDisponibles: { type: Number, default: 0 },
     fechaIngreso: { type: Date, default: () => new Date(new Date().getFullYear(), 0, 1) },
-    fotoPerfil: { type: String, default: '' }
+    fotoPerfil: { type: String, default: '' },
+    estadoCuenta: { type: String, enum: ['pendiente', 'activa', 'rechazada'], default: 'pendiente' }
 }, { timestamps: true });
 const User = mongoose.model('User', UserSchema);
 
@@ -246,7 +247,7 @@ app.post('/api/register', async (req, res) => {
         const newUser = new User({ nombre, apellido, correo, telefono, password, firma, fotoPerfil, fechaIngreso: fechaIngreso || new Date() });
         await newUser.save();
 
-        res.status(201).json({ message: 'Usuario registrado exitosamente', user: newUser });
+        res.status(201).json({ message: 'Usuario registrado. Pendiente de aprobación.', user: newUser });
     } catch (e) {
         res.status(500).json({ error: 'Error interno guardando el usuario.' });
     }
@@ -266,6 +267,49 @@ app.get('/api/users', async (req, res) => {
         res.json(usersData);
     } catch (e) {
         res.status(500).json({ error: 'Error obteniendo usuarios.' });
+    }
+});
+
+// 1.2.0 Obtener Usuarios Pendientes de Aprobación
+app.get('/api/users/pending', async (req, res) => {
+    try {
+        const pendingUsers = await User.find({ estadoCuenta: 'pendiente' }).select('-password -firma').sort({ createdAt: -1 });
+        res.json(pendingUsers);
+    } catch (e) {
+        res.status(500).json({ error: 'Error obteniendo solicitudes de cuenta.' });
+    }
+});
+
+// 1.2.0.1 Aprobar o Rechazar Solicitud de Cuenta
+app.put('/api/users/:id/approve-registration', async (req, res) => {
+    try {
+        const { rol, fechaIngreso } = req.body;
+        const user = await User.findById(req.params.id);
+        if (!user) return res.status(404).json({ error: 'Usuario no encontrado.' });
+        if (user.estadoCuenta !== 'pendiente') return res.status(400).json({ error: 'La cuenta no está en estado pendiente.' });
+
+        user.estadoCuenta = 'activa';
+        user.rol = rol || 'user';
+        if (fechaIngreso) {
+            user.fechaIngreso = new Date(fechaIngreso);
+        }
+        await user.save();
+        res.json({ message: 'Cuenta aprobada exitosamente', user });
+    } catch (e) {
+        res.status(500).json({ error: 'Error aprobando cuenta.' });
+    }
+});
+
+app.delete('/api/users/:id/reject-registration', async (req, res) => {
+    try {
+        const user = await User.findById(req.params.id);
+        if (!user) return res.status(404).json({ error: 'Usuario no encontrado.' });
+        if (user.estadoCuenta !== 'pendiente') return res.status(400).json({ error: 'Solo puedes rechazar cuentas pendientes.' });
+
+        await User.findByIdAndDelete(req.params.id);
+        res.json({ message: 'Cuenta rechazada y eliminada del sistema.' });
+    } catch (e) {
+        res.status(500).json({ error: 'Error rechazando cuenta.' });
     }
 });
 
@@ -490,6 +534,14 @@ app.post('/api/login', async (req, res) => {
 
         if (!user) {
             return res.status(401).json({ error: 'Credenciales inválidas.' });
+        }
+
+        if (user.estadoCuenta === 'pendiente') {
+            return res.status(403).json({ error: 'Tu cuenta está pendiente de aprobación por un administrador.' });
+        }
+
+        if (user.estadoCuenta === 'rechazada') {
+            return res.status(403).json({ error: 'Tu cuenta ha sido rechazada.' });
         }
 
         if (!user.password) {
