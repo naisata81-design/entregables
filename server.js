@@ -60,6 +60,16 @@ const SettingsSchema = new mongoose.Schema({
 }, { timestamps: true });
 const Settings = mongoose.model('Settings', SettingsSchema);
 
+const AvisoSchema = new mongoose.Schema({
+    titulo: { type: String, required: true },
+    mensaje: { type: String, required: true },
+    imagen: { type: String, default: '' },
+    fechaInicio: { type: Date, required: true },
+    fechaFin: { type: Date, required: true },
+    activo: { type: Boolean, default: true }
+}, { timestamps: true });
+const Aviso = mongoose.model('Aviso', AvisoSchema);
+
 const CompanySchema = new mongoose.Schema({
     nombre: String,
     logo: String
@@ -1348,6 +1358,57 @@ app.post('/api/vacations/historical', async (req, res) => {
     } catch (e) {
         console.error('Error insertando vacacion historica:', e);
         res.status(500).json({ error: 'Error agregando historial de vacaciones.' });
+    }
+});
+
+// --- Avisos / Anuncios Globales ---
+app.get('/api/avisos', async (req, res) => {
+    try {
+        const { all } = req.query;
+        let query = {};
+        if (all !== 'true') {
+            const today = new Date();
+            query = {
+                activo: true,
+                fechaInicio: { $lte: today },
+                fechaFin: { $gte: today }
+            };
+        }
+        const avisos = await Aviso.find(query).sort({ createdAt: -1 });
+        res.json(avisos);
+    } catch (e) {
+        res.status(500).json({ error: 'Error obteniendo avisos.' });
+    }
+});
+
+app.post('/api/avisos', async (req, res) => {
+    try {
+        const { titulo, mensaje, imagen, fechaInicio, fechaFin } = req.body;
+        if (!titulo || !mensaje || !fechaInicio || !fechaFin) {
+            return res.status(400).json({ error: 'Título, mensaje, fecha inicio y fin son obligatorios.' });
+        }
+        
+        const nuevoAviso = new Aviso({ 
+            titulo, 
+            mensaje, 
+            imagen, 
+            fechaInicio: new Date(fechaInicio+"T00:00:00"), 
+            fechaFin: new Date(fechaFin+"T23:59:59") 
+        });
+        await nuevoAviso.save();
+        res.status(201).json(nuevoAviso);
+    } catch (e) {
+        console.error('Error insertando aviso:', e);
+        res.status(500).json({ error: 'Error creando aviso.', details: e.message });
+    }
+});
+
+app.delete('/api/avisos/:id', async (req, res) => {
+    try {
+        await Aviso.findByIdAndDelete(req.params.id);
+        res.json({ message: 'Aviso eliminado' });
+    } catch (e) {
+        res.status(500).json({ error: 'Error eliminando aviso.' });
     }
 });
 
