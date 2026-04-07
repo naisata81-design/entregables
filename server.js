@@ -42,6 +42,7 @@ const UserSchema = new mongoose.Schema({
     diasVacacionesDisponibles: { type: Number, default: 0 },
     fechaIngreso: { type: Date, default: () => new Date(new Date().getFullYear(), 0, 1) },
     fotoPerfil: { type: String, default: '' },
+    terminosAceptados: { type: Boolean, default: false },
     estadoCuenta: { type: String, enum: ['pendiente', 'activa', 'rechazada'] }
 }, { timestamps: true });
 const User = mongoose.model('User', UserSchema);
@@ -506,6 +507,22 @@ app.put('/api/users/:id/reset-password', async (req, res) => {
         res.json({ message: 'Contraseña actualizada correctamente.' });
     } catch (e) {
         res.status(500).json({ error: 'Error actualizando contraseña.' });
+    }
+});
+
+// 1.3.2 Aceptar Términos y Condiciones
+app.put('/api/users/:id/accept-terms', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const user = await User.findById(id);
+        if (!user) return res.status(404).json({ error: 'Usuario no encontrado.' });
+
+        user.terminosAceptados = true;
+        await user.save();
+        
+        res.json({ message: 'Términos aceptados correctamente.', user });
+    } catch (e) {
+        res.status(500).json({ error: 'Error aceptando términos legales.' });
     }
 });
 
