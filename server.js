@@ -147,6 +147,7 @@ const InventoryItemSchema = new mongoose.Schema({
     cantidadEnStock: { type: Number, default: 0 },
     tipo: { type: String, enum: ['Insumo', 'Herramienta'], required: true },
     nombre: { type: String, required: true },
+    categoria: { type: String, default: '' },
     numeroParte: { type: String, required: true, unique: true },
     marca: { type: String, default: '' },
     ubicacion: { type: String, default: '' },
@@ -1337,7 +1338,7 @@ app.get('/api/inventory', async (req, res) => {
 
 app.post('/api/inventory', async (req, res) => {
     try {
-        let { tipo, nombre, numeroParte, marca, ubicacion, cantidadEnStock } = req.body;
+        let { tipo, nombre, categoria, numeroParte, marca, ubicacion, cantidadEnStock } = req.body;
         
         if (!tipo || !nombre) {
             return res.status(400).json({ error: 'Falta tipo o nombre del ítem.' });
@@ -1363,7 +1364,7 @@ app.post('/api/inventory', async (req, res) => {
         cantidadEnStock = parseInt(cantidadEnStock) || 0;
 
         const newItem = new InventoryItem({
-            tipo, nombre, numeroParte, marca, ubicacion, cantidadEnStock
+            tipo, nombre, categoria, numeroParte, marca, ubicacion, cantidadEnStock
         });
         await newItem.save();
         
@@ -1381,13 +1382,14 @@ app.post('/api/inventory', async (req, res) => {
 app.put('/api/inventory/:id', async (req, res) => {
     try {
         const { id } = req.params;
-        let { tipo, nombre, numeroParte, marca, ubicacion, cantidadEnStock } = req.body;
+        let { tipo, nombre, categoria, numeroParte, marca, ubicacion, cantidadEnStock } = req.body;
         
         const item = await InventoryItem.findById(id);
         if (!item) return res.status(404).json({ error: 'Item no encontrado.' });
         
         if (tipo) item.tipo = tipo.toUpperCase() === 'HERRAMIENTA' ? 'Herramienta' : 'Insumo';
         if (nombre) item.nombre = nombre.toUpperCase();
+        if (categoria !== undefined) item.categoria = categoria;
         if (numeroParte) item.numeroParte = numeroParte.toUpperCase();
         if (marca !== undefined) item.marca = marca.toUpperCase();
         if (ubicacion !== undefined) item.ubicacion = ubicacion.toUpperCase();
