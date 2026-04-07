@@ -261,6 +261,11 @@ app.post('/api/register', async (req, res) => {
             return res.status(400).json({ error: 'Todos los campos, foto de perfil y la firma son requeridos.' });
         }
 
+        const pwdRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[\W_]).{8,}$/;
+        if (!pwdRegex.test(password)) {
+            return res.status(400).json({ error: 'La contraseña debe tener mínimo 8 caracteres, e incluir al menos una mayúscula, una minúscula, un número y un signo especial.' });
+        }
+
         if (!correo.endsWith('@naisata.com')) {
             return res.status(403).json({ error: 'Acceso denegado. Correo no autorizado.' });
         }
@@ -1171,8 +1176,7 @@ app.post('/api/checkin', async (req, res) => {
 
 app.get('/api/checkins', async (req, res) => {
     try {
-        // Excluimos 'foto' para no sobrecargar el ancho de banda
-        const checkins = await CheckIn.find().select('-foto').sort({ createdAt: -1 }).limit(100);
+        const checkins = await CheckIn.find().sort({ createdAt: -1 }).limit(100);
         res.json(checkins);
     } catch (e) {
         res.status(500).json({ error: 'Error obteniendo registros del checador.' });
