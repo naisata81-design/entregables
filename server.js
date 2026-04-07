@@ -179,19 +179,42 @@ const InventoryTransaction = mongoose.model('InventoryTransaction', InventoryTra
 
 
 async function calcularVacacionesDinamicamente(user) {
-    if (!user || !user.fechaIngreso) return 0;
+    if (!user) return 0;
+
+    // Prioridad Absoluta: Si la DB tiene días cargados manualmente (ej. por admin antiguo/forzoso), sobrescriben TODO.
+    if (user.diasVacacionesDisponibles !== undefined && user.diasVacacionesDisponibles > 0) {
+        // Necesitamos calcular consumidos para no mentir
+        const hoy = new Date();
+        const inicioAnio = new Date(hoy.getFullYear(), 0, 1);
+        const solicitudesConsumidas = await VacationRequest.find({
+            userId: user._id.toString(),
+            estado: 'aprobada',
+            fechaInicio: { $gte: inicioAnio }
+        });
+        const consumidos = solicitudesConsumidas.reduce((acc, curr) => acc + curr.diasSolicitados, 0);
+        return Math.max(0, user.diasVacacionesDisponibles - consumidos);
+    }
+
+    // Fallback si no tiene fechaIngreso en DB (cuenta súper vieja)
+    const fechaReal = user.fechaIngreso ? new Date(user.fechaIngreso) : new Date(new Date().getFullYear(), 0, 1);
+
     const hoy = new Date();
-    const ingreso = new Date(user.fechaIngreso);
+    const ingreso = fechaReal;
     let aniosAntiguedad = hoy.getFullYear() - ingreso.getFullYear();
     const mesHoy = hoy.getMonth();
     const diaHoy = hoy.getDate();
     const mesIngreso = ingreso.getMonth();
     const diaIngreso = ingreso.getDate();
+
+    // Ajustar si aún no cumple años de aniversario laboral
     if (mesHoy < mesIngreso || (mesHoy === mesIngreso && diaHoy < diaIngreso)) {
         aniosAntiguedad--;
     }
+
+    // Calcular el inicio del ciclo vacacional actual para contar consumos desde ahí
     let cicloActualInicio = new Date(ingreso);
     cicloActualInicio.setFullYear(ingreso.getFullYear() + aniosAntiguedad);
+
     let diasBase = 0;
     const diffMeses = (hoy.getFullYear() - ingreso.getFullYear()) * 12 + (hoy.getMonth() - ingreso.getMonth());
     const exactDiffMeses = diffMeses - (hoy.getDate() < ingreso.getDate() ? 1 : 0);
@@ -208,11 +231,6 @@ async function calcularVacacionesDinamicamente(user) {
         diasBase = 12;
     } else {
         diasBase = 12 + ((aniosAntiguedad - 1) * 2);
-    }
-    
-    // Si la DB tiene días cargados manualmente (por el admin), sobrescriben la cuota LFT de la base.
-    if (user.diasVacacionesDisponibles && user.diasVacacionesDisponibles > 0) {
-        diasBase = user.diasVacacionesDisponibles;
     }
 
     if (diasBase === 0) return 0;
@@ -1258,8 +1276,10 @@ app.post('/api/vacations', async (req, res) => {
         const user = await User.findById(userId);
         if (!user) return res.status(404).json({ error: 'Usuario no encontrado.' });
 
-        if (user.diasVacacionesDisponibles < diasSolicitados) {
-            return res.status(400).json({ error: 'No tienes suficientes días de vacaciones disponibles.' });
+        const diasDisponiblesCalculados = await calcularVacacionesDinamicamente(user);
+
+        if (diasDisponiblesCalculados < diasSolicitados) {
+            return res.status(400).json({ error: `No tienes suficientes días de vacaciones disponibles. Disponibles: ${diasDisponiblesCalculados}, Solicitados: ${diasSolicitados}` });
         }
 
         const newRequest = new VacationRequest({
