@@ -42,7 +42,7 @@ const UserSchema = new mongoose.Schema({
     diasVacacionesDisponibles: { type: Number, default: 0 },
     fechaIngreso: { type: Date, default: () => new Date(new Date().getFullYear(), 0, 1) },
     fotoPerfil: { type: String, default: '' },
-    estadoCuenta: { type: String, enum: ['pendiente', 'activa', 'rechazada'], default: 'pendiente' }
+    estadoCuenta: { type: String, enum: ['pendiente', 'activa', 'rechazada'] }
 }, { timestamps: true });
 const User = mongoose.model('User', UserSchema);
 
@@ -244,7 +244,11 @@ app.post('/api/register', async (req, res) => {
             return res.status(400).json({ error: 'El correo ya está registrado.' });
         }
 
-        const newUser = new User({ nombre, apellido, correo, telefono, password, firma, fotoPerfil, fechaIngreso: fechaIngreso || new Date() });
+        const newUser = new User({ 
+            nombre, apellido, correo, telefono, password, firma, fotoPerfil, 
+            fechaIngreso: fechaIngreso || new Date(),
+            estadoCuenta: 'pendiente'
+        });
         await newUser.save();
 
         res.status(201).json({ message: 'Usuario registrado. Pendiente de aprobación.', user: newUser });
