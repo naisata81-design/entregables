@@ -457,13 +457,16 @@ app.get('/api/users/:id/dashboard-stats', async (req, res) => {
 
         const hoy = new Date();
         const ingreso = user.fechaIngreso ? new Date(user.fechaIngreso) : new Date(hoy.getFullYear(), 0, 1);
-        ingreso.setHours(0,0,0,0);
+        
+        let startTrackingDate = new Date(user.createdAt || hoy);
+        startTrackingDate.setHours(0,0,0,0);
+        let trackStartStr = `${startTrackingDate.getFullYear()}-${String(startTrackingDate.getMonth()+1).padStart(2,'0')}-${String(startTrackingDate.getDate()).padStart(2,'0')}`;
 
         const ayer = new Date();
         ayer.setDate(ayer.getDate() - 1);
         ayer.setHours(23,59,59,999);
 
-        let iterDate = new Date(ingreso);
+        let iterDate = new Date(startTrackingDate);
         while(iterDate <= ayer) {
             const dayOfWeek = iterDate.getDay();
             let horarioDia = (user.usaHorarioPersonalizado && user.horariosPorDia)
@@ -1311,6 +1314,36 @@ app.get('/api/vacations', async (req, res) => {
         res.json(requests);
     } catch (e) {
         res.status(500).json({ error: 'Error obteniendo solicitudes de vacaciones.' });
+    }
+});
+
+app.post('/api/vacations/historical', async (req, res) => {
+    try {
+        const { userId, userName, fechaInicio, fechaFin, diasSolicitados, motivo } = req.body;
+
+        if (!userId || !fechaInicio || !fechaFin || !diasSolicitados) {
+            return res.status(400).json({ error: 'Faltan campos requeridos.' });
+        }
+
+        const user = await User.findById(userId);
+        if (!user) return res.status(404).json({ error: 'Usuario no encontrado.' });
+
+        // A direct historical entry bypasses availability validation and goes straight to 'aprobada'
+        const newRequest = new VacationRequest({
+            userId, 
+            userName: userName || `${user.nombre} ${user.apellido}`, 
+            fechaInicio, 
+            fechaFin, 
+            diasSolicitados, 
+            motivo: motivo || 'Días históricos / previas al sistema',
+            estado: 'aprobada' // Native approval guarantees immediate deduction
+        });
+
+        await newRequest.save();
+        res.status(201).json(newRequest);
+    } catch (e) {
+        console.error('Error insertando vacacion historica:', e);
+        res.status(500).json({ error: 'Error agregando historial de vacaciones.' });
     }
 });
 
