@@ -43,6 +43,7 @@ const UserSchema = new mongoose.Schema({
     fechaIngreso: { type: Date, default: () => new Date(new Date().getFullYear(), 0, 1) },
     fotoPerfil: { type: String, default: '' },
     terminosAceptados: { type: Boolean, default: false },
+    evidenciaTerminos: { type: String, default: '' },
     estadoCuenta: { type: String, enum: ['pendiente', 'activa', 'rechazada'] }
 }, { timestamps: true });
 const User = mongoose.model('User', UserSchema);
@@ -208,6 +209,12 @@ async function calcularVacacionesDinamicamente(user) {
     } else {
         diasBase = 12 + ((aniosAntiguedad - 1) * 2);
     }
+    
+    // Si la DB tiene días cargados manualmente (por el admin), sobrescriben la cuota LFT de la base.
+    if (user.diasVacacionesDisponibles && user.diasVacacionesDisponibles > 0) {
+        diasBase = user.diasVacacionesDisponibles;
+    }
+
     if (diasBase === 0) return 0;
 
     const solicitudesConsumidas = await VacationRequest.find({
@@ -514,9 +521,15 @@ app.put('/api/users/:id/reset-password', async (req, res) => {
 app.put('/api/users/:id/accept-terms', async (req, res) => {
     try {
         const { id } = req.params;
+        const { evidencia } = req.body;
+        
         const user = await User.findById(id);
         if (!user) return res.status(404).json({ error: 'Usuario no encontrado.' });
 
+        if (evidencia) {
+            user.evidenciaTerminos = evidencia;
+        }
+        
         user.terminosAceptados = true;
         await user.save();
         
