@@ -1376,7 +1376,7 @@ app.get('/api/admin/clock-stats', async (req, res) => {
         const users = await User.find({}).select('nombre apellido _id fechaIngreso horariosPorDia usaHorarioPersonalizado');
         const settings = await Settings.findOne({ tipo: 'timeclock' });
         const globalHorarios = settings ? settings.horariosPorDia : [];
-        const globalTolerancia = settings ? settings.toleranciaMinutos : 15;
+        const globalTolerancia = settings ? Number(settings.toleranciaMinutos) || 15 : 15;
         
         let report = [];
         
