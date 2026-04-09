@@ -104,7 +104,7 @@ const TicketSchema = new mongoose.Schema({
 const CheckInSchema = new mongoose.Schema({
     userId: { type: String, required: true },
     userName: { type: String, required: true },
-    tipo: { type: String, enum: ['Entrada', 'Salida'], required: true },
+    tipo: { type: String, enum: ['Entrada', 'Salida', 'Salida Comida', 'Entrada Comida'], required: true },
     servicio: { type: String, required: true },
     ubicacion: {
         lat: { type: Number, required: true },
@@ -310,8 +310,8 @@ app.post('/api/register', async (req, res) => {
             return res.status(400).json({ error: 'El correo ya está registrado.' });
         }
 
-        const newUser = new User({ 
-            nombre, apellido, correo, telefono, password, firma, fotoPerfil, 
+        const newUser = new User({
+            nombre, apellido, correo, telefono, password, firma, fotoPerfil,
             fechaIngreso: fechaIngreso || new Date(),
             estadoCuenta: 'pendiente'
         });
@@ -329,10 +329,10 @@ app.get('/api/users', async (req, res) => {
         const users = await User.find().select('-password -firma').sort({ createdAt: -1 });
         const usersData = [];
         for (const user of users) {
-             const diasCalc = await calcularVacacionesDinamicamente(user);
-             const userObj = user.toObject();
-             userObj.diasVacacionesDisponibles = diasCalc;
-             usersData.push(userObj);
+            const diasCalc = await calcularVacacionesDinamicamente(user);
+            const userObj = user.toObject();
+            userObj.diasVacacionesDisponibles = diasCalc;
+            usersData.push(userObj);
         }
         res.json(usersData);
     } catch (e) {
@@ -433,8 +433,8 @@ app.get('/api/users/:id/dashboard-stats', async (req, res) => {
         }
 
         // 2. Calcular herramientas prestadas al empleado (Inventario Actual)
-        const transactions = await InventoryTransaction.find({ 
-            responsable: { $in: [fullName, user.nombre, user.nombre.trim()] } 
+        const transactions = await InventoryTransaction.find({
+            responsable: { $in: [fullName, user.nombre, user.nombre.trim()] }
         }).populate('itemId');
         const countMap = {}; // itemId -> net quantity
 
@@ -460,7 +460,7 @@ app.get('/api/users/:id/dashboard-stats', async (req, res) => {
         // 3. Historial de una Semana
         const sevenDaysAgo = new Date();
         sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-        const weeklyTransactionsRaw = await InventoryTransaction.find({ 
+        const weeklyTransactionsRaw = await InventoryTransaction.find({
             responsable: { $in: [fullName, user.nombre, user.nombre.trim()] },
             fecha: { $gte: sevenDaysAgo }
         }).sort({ fecha: -1 }).populate('itemId');
@@ -480,11 +480,11 @@ app.get('/api/users/:id/dashboard-stats', async (req, res) => {
         let faltasTotales = 0;
         let listaFaltas = [];
         const vacacionesAprobadas = await VacationRequest.find({ userId: userId, estado: 'aprobada' });
-        
+
         const isVacation = (dateObj) => {
             return vacacionesAprobadas.some(v => {
-                const start = new Date(v.fechaInicio); start.setHours(0,0,0,0);
-                const end = new Date(v.fechaFin); end.setHours(23,59,59,999);
+                const start = new Date(v.fechaInicio); start.setHours(0, 0, 0, 0);
+                const end = new Date(v.fechaFin); end.setHours(23, 59, 59, 999);
                 return dateObj >= start && dateObj <= end;
             });
         };
@@ -492,29 +492,29 @@ app.get('/api/users/:id/dashboard-stats', async (req, res) => {
         const checkinDates = new Set();
         for (const c of checkins) {
             const d = new Date(c.timestamp);
-            checkinDates.add(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`);
+            checkinDates.add(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
         }
 
         const hoy = new Date();
         const ingreso = user.fechaIngreso ? new Date(user.fechaIngreso) : new Date(hoy.getFullYear(), 0, 1);
-        
+
         let startTrackingDate = new Date(user.createdAt || hoy);
-        startTrackingDate.setHours(0,0,0,0);
-        let trackStartStr = `${startTrackingDate.getFullYear()}-${String(startTrackingDate.getMonth()+1).padStart(2,'0')}-${String(startTrackingDate.getDate()).padStart(2,'0')}`;
+        startTrackingDate.setHours(0, 0, 0, 0);
+        let trackStartStr = `${startTrackingDate.getFullYear()}-${String(startTrackingDate.getMonth() + 1).padStart(2, '0')}-${String(startTrackingDate.getDate()).padStart(2, '0')}`;
 
         const ayer = new Date();
         ayer.setDate(ayer.getDate() - 1);
-        ayer.setHours(23,59,59,999);
+        ayer.setHours(23, 59, 59, 999);
 
         let iterDate = new Date(startTrackingDate);
-        while(iterDate <= ayer) {
+        while (iterDate <= ayer) {
             const dayOfWeek = iterDate.getDay();
             let horarioDia = (user.usaHorarioPersonalizado && user.horariosPorDia)
                 ? user.horariosPorDia.find(h => h.dia === dayOfWeek)
                 : globalHorarios.find(h => h.dia === dayOfWeek);
 
             if (horarioDia && horarioDia.activo && horarioDia.entrada) {
-                const tsStr = `${iterDate.getFullYear()}-${String(iterDate.getMonth()+1).padStart(2,'0')}-${String(iterDate.getDate()).padStart(2,'0')}`;
+                const tsStr = `${iterDate.getFullYear()}-${String(iterDate.getMonth() + 1).padStart(2, '0')}-${String(iterDate.getDate()).padStart(2, '0')}`;
                 if (!checkinDates.has(tsStr) && !isVacation(iterDate)) {
                     faltasTotales++;
                     listaFaltas.push(tsStr);
@@ -577,7 +577,7 @@ app.put('/api/users/:id/reset-password', async (req, res) => {
 
         user.password = newPassword;
         await user.save();
-        
+
         res.json({ message: 'Contraseña actualizada correctamente.' });
     } catch (e) {
         res.status(500).json({ error: 'Error actualizando contraseña.' });
@@ -589,17 +589,17 @@ app.put('/api/users/:id/accept-terms', async (req, res) => {
     try {
         const { id } = req.params;
         const { evidencia } = req.body;
-        
+
         const user = await User.findById(id);
         if (!user) return res.status(404).json({ error: 'Usuario no encontrado.' });
 
         if (evidencia) {
             user.evidenciaTerminos = evidencia;
         }
-        
+
         user.terminosAceptados = true;
         await user.save();
-        
+
         res.json({ message: 'Términos aceptados correctamente.', user });
     } catch (e) {
         res.status(500).json({ error: 'Error aceptando términos legales.' });
@@ -846,7 +846,7 @@ app.post('/api/vehicles', async (req, res) => {
 app.put('/api/vehicles/:id', async (req, res) => {
     try {
         const v = await Vehicle.findByIdAndUpdate(req.params.id, req.body, { new: true });
-        if(!v) return res.status(404).json({error: 'No encontrado'});
+        if (!v) return res.status(404).json({ error: 'No encontrado' });
         res.json(v);
     } catch (e) {
         res.status(500).json({ error: 'Error interno.' });
@@ -857,7 +857,7 @@ app.delete('/api/vehicles/:id', async (req, res) => {
     try {
         await Vehicle.findByIdAndDelete(req.params.id);
         res.json({ message: 'Eliminado.' });
-    } catch(e) {
+    } catch (e) {
         res.status(500).json({ error: 'Error interno.' });
     }
 });
@@ -869,7 +869,7 @@ app.post('/api/vehicles/:id/loan', async (req, res) => {
         const vehicle = await Vehicle.findById(req.params.id);
         if (!vehicle) return res.status(404).json({ error: 'Vehículo no encontrado.' });
         if (vehicle.estado !== 'Disponible') return res.status(400).json({ error: 'El vehículo no está disponible.' });
-        
+
         vehicle.estado = 'Prestado';
         vehicle.currentUserId = userId;
         vehicle.currentUserName = userName;
@@ -897,7 +897,7 @@ app.post('/api/vehicles/:id/return', async (req, res) => {
         const vehicle = await Vehicle.findById(req.params.id);
         if (!vehicle) return res.status(404).json({ error: 'Vehículo no encontrado.' });
         if (vehicle.estado !== 'Prestado') return res.status(400).json({ error: 'El vehículo no está prestado actualmente.' });
-        
+
         vehicle.estado = 'Disponible';
         vehicle.currentUserId = null;
         vehicle.currentUserName = null;
@@ -925,7 +925,7 @@ app.post('/api/vehicles/:id/return', async (req, res) => {
 app.get('/api/users/:id/vehicles', async (req, res) => {
     try {
         const txs = await VehicleTransaction.find({ userId: req.params.id }).sort({ fecha: -1 }).populate('vehicleId');
-        
+
         // Uso de la nueva propiedad global del vehículo para evitar bucles visuales:
         const currentVehicles = await Vehicle.find({ currentUserId: req.params.id });
 
@@ -933,8 +933,8 @@ app.get('/api/users/:id/vehicles', async (req, res) => {
             currentVehicles,
             history: txs
         });
-    } catch(e) {
-         res.status(500).json({ error: 'Error obteniendo historial de vehículo.' });
+    } catch (e) {
+        res.status(500).json({ error: 'Error obteniendo historial de vehículo.' });
     }
 });
 
@@ -1355,6 +1355,110 @@ app.get('/api/checkins', async (req, res) => {
     }
 });
 
+// Obtener registros de HOY para la máquina de estados del botón de un empleado
+app.get('/api/checkins/today/:userId', async (req, res) => {
+    try {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const checkins = await CheckIn.find({ 
+            userId: req.params.userId,
+            timestamp: { $gte: today }
+        }).sort({ timestamp: 1 });
+        res.json(checkins);
+    } catch (e) {
+        res.status(500).json({ error: 'Error obteniendo registros de hoy.' });
+    }
+});
+
+// 6.1 Reportes y Estadísticas para Administradores
+app.get('/api/admin/clock-stats', async (req, res) => {
+    try {
+        const users = await User.find({}).select('nombre apellido _id fechaIngreso horariosPorDia usaHorarioPersonalizado');
+        const settings = await Settings.findOne({ tipo: 'timeclock' });
+        const globalHorarios = settings ? settings.horariosPorDia : [];
+        const globalTolerancia = settings ? settings.toleranciaMinutos : 15;
+        
+        let report = [];
+        
+        for (const user of users) {
+             const userId = user._id.toString();
+             const checkins = await CheckIn.find({ userId }).sort({ timestamp: 1 });
+             const vacaciones = await VacationRequest.find({ userId: userId, estado: 'aprobada' });
+             
+             const isVacation = (dateObj) => {
+                 return vacaciones.some(v => {
+                     const start = new Date(v.fechaInicio); start.setHours(0, 0, 0, 0);
+                     const end = new Date(v.fechaFin); end.setHours(23, 59, 59, 999);
+                     return dateObj >= start && dateObj <= end;
+                 });
+             };
+
+             let faltasTotales = 0;
+             let retardosTotales = 0;
+             
+             // Agrupar checkins por día
+             const checkinsPorDia = {};
+             checkins.forEach(c => {
+                 const d = new Date(c.timestamp);
+                 const dateStr = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+                 if(!checkinsPorDia[dateStr]) checkinsPorDia[dateStr] = [];
+                 checkinsPorDia[dateStr].push(c);
+             });
+
+             const checkinDatesStr = new Set(Object.keys(checkinsPorDia));
+             
+             const hoy = new Date();
+             const ayer = new Date();
+             ayer.setDate(ayer.getDate() - 1);
+             ayer.setHours(23, 59, 59, 999);
+             
+             let startTrackingDate = new Date(user.fechaIngreso || hoy.getFullYear(), 0, 1);
+             startTrackingDate.setHours(0, 0, 0, 0);
+
+             let iterDate = new Date(startTrackingDate);
+             while (iterDate <= ayer) {
+                 const dayOfWeek = iterDate.getDay();
+                 let horarioDia = (user.usaHorarioPersonalizado && user.horariosPorDia)
+                     ? user.horariosPorDia.find(h => h.dia === dayOfWeek)
+                     : globalHorarios.find(h => h.dia === dayOfWeek);
+
+                 if (horarioDia && horarioDia.activo && horarioDia.entrada) {
+                     const tsStr = `${iterDate.getFullYear()}-${String(iterDate.getMonth()+1).padStart(2,'0')}-${String(iterDate.getDate()).padStart(2,'0')}`;
+                     
+                     if (!checkinDatesStr.has(tsStr) && !isVacation(iterDate)) {
+                         faltasTotales++;
+                     } else if (checkinDatesStr.has(tsStr)) {
+                         // Buscar la primera entrada de ese dia
+                         const entradasDelDia = checkinsPorDia[tsStr].filter(c => c.tipo === 'Entrada');
+                         if(entradasDelDia.length > 0) {
+                             const primeraEntrada = entradasDelDia[0];
+                             const d = new Date(primeraEntrada.timestamp);
+                             const [h, m] = horarioDia.entrada.split(':').map(Number);
+                             const expectedMinutes = h * 60 + m;
+                             const actualMinutes = d.getHours() * 60 + d.getMinutes();
+                             if (actualMinutes > (expectedMinutes + globalTolerancia)) {
+                                 retardosTotales++;
+                             }
+                         }
+                     }
+                 }
+                 iterDate.setDate(iterDate.getDate() + 1);
+             }
+             
+             report.push({
+                 empleado: `${user.nombre} ${user.apellido}`,
+                 faltasTotales,
+                 retardosTotales,
+                 historial: checkinsPorDia
+             });
+        }
+        res.json(report);
+    } catch (e) {
+        console.error('Error stats admin:', e);
+        res.status(500).json({ error: 'Error procesando stats.' });
+    }
+});
+
 // Endpoint para el "Empleado de la Semana"
 app.get('/api/employee-of-the-week', async (req, res) => {
     try {
@@ -1506,11 +1610,11 @@ app.post('/api/vacations/historical', async (req, res) => {
 
         // A direct historical entry bypasses availability validation and goes straight to 'aprobada'
         const newRequest = new VacationRequest({
-            userId, 
-            userName: userName || `${user.nombre} ${user.apellido}`, 
-            fechaInicio, 
-            fechaFin, 
-            diasSolicitados, 
+            userId,
+            userName: userName || `${user.nombre} ${user.apellido}`,
+            fechaInicio,
+            fechaFin,
+            diasSolicitados,
             motivo: motivo || 'Días históricos / previas al sistema',
             estado: 'aprobada' // Native approval guarantees immediate deduction
         });
@@ -1549,13 +1653,13 @@ app.post('/api/avisos', async (req, res) => {
         if (!titulo || !mensaje || !fechaInicio || !fechaFin) {
             return res.status(400).json({ error: 'Título, mensaje, fecha inicio y fin son obligatorios.' });
         }
-        
-        const nuevoAviso = new Aviso({ 
-            titulo, 
-            mensaje, 
-            imagen, 
-            fechaInicio: new Date(fechaInicio+"T00:00:00"), 
-            fechaFin: new Date(fechaFin+"T23:59:59") 
+
+        const nuevoAviso = new Aviso({
+            titulo,
+            mensaje,
+            imagen,
+            fechaInicio: new Date(fechaInicio + "T00:00:00"),
+            fechaFin: new Date(fechaFin + "T23:59:59")
         });
         await nuevoAviso.save();
         res.status(201).json(nuevoAviso);
@@ -1757,11 +1861,11 @@ app.get('/api/inventory', async (req, res) => {
 app.post('/api/inventory', async (req, res) => {
     try {
         let { tipo, nombre, categoria, numeroParte, marca, ubicacion, cantidadEnStock } = req.body;
-        
+
         if (!tipo || !nombre) {
             return res.status(400).json({ error: 'Falta tipo o nombre del ítem.' });
         }
-        
+
         if (!numeroParte) {
             // Need brand and location if part number is auto-generated
             if (!marca || !ubicacion) {
@@ -1772,7 +1876,7 @@ app.post('/api/inventory', async (req, res) => {
             const randomDigits = Math.floor(100 + Math.random() * 900);
             numeroParte = `${prefix}${randomDigits}`;
         }
-        
+
         // Force uppercase for standardization
         tipo = tipo.toUpperCase() === 'HERRAMIENTA' ? 'Herramienta' : 'Insumo';
         nombre = nombre.toUpperCase();
@@ -1785,7 +1889,7 @@ app.post('/api/inventory', async (req, res) => {
             tipo, nombre, categoria, numeroParte, marca, ubicacion, cantidadEnStock
         });
         await newItem.save();
-        
+
         const responseObj = { ...newItem.toObject(), id: newItem._id.toString() };
         io.emit('new_inventory_item', responseObj);
         res.status(201).json(responseObj);
@@ -1801,10 +1905,10 @@ app.put('/api/inventory/:id', async (req, res) => {
     try {
         const { id } = req.params;
         let { tipo, nombre, categoria, numeroParte, marca, ubicacion, cantidadEnStock } = req.body;
-        
+
         const item = await InventoryItem.findById(id);
         if (!item) return res.status(404).json({ error: 'Item no encontrado.' });
-        
+
         if (tipo) item.tipo = tipo.toUpperCase() === 'HERRAMIENTA' ? 'Herramienta' : 'Insumo';
         if (nombre) item.nombre = nombre.toUpperCase();
         if (categoria !== undefined) item.categoria = categoria;
@@ -1812,9 +1916,9 @@ app.put('/api/inventory/:id', async (req, res) => {
         if (marca !== undefined) item.marca = marca.toUpperCase();
         if (ubicacion !== undefined) item.ubicacion = ubicacion.toUpperCase();
         if (cantidadEnStock !== undefined) item.cantidadEnStock = parseInt(cantidadEnStock) || 0;
-        
+
         await item.save();
-        
+
         const responseObj = { ...item.toObject(), id: item._id.toString() };
         io.emit('update_inventory_item', responseObj);
         res.json(responseObj);
@@ -1828,7 +1932,7 @@ app.delete('/api/inventory/:id', async (req, res) => {
     try {
         const deletedItem = await InventoryItem.findByIdAndDelete(req.params.id);
         if (!deletedItem) return res.status(404).json({ error: 'Item no encontrado.' });
-        
+
         io.emit('delete_inventory_item', req.params.id);
         res.json({ message: 'Ítem eliminado correctamente.' });
     } catch (e) {
@@ -1840,31 +1944,31 @@ app.post('/api/inventory/:id/report-broken', async (req, res) => {
     try {
         const { id } = req.params;
         const { cantidad, reportadoPor, falla, enCampo } = req.body;
-        
+
         const cant = parseInt(cantidad) || 1;
 
         const item = await InventoryItem.findById(id);
         if (!item) return res.status(404).json({ error: 'Item no encontrado.' });
-        
+
         if (!enCampo) {
             if (item.cantidadEnStock < cant) {
-                 return res.status(400).json({ error: 'No hay suficiente stock para marcar esta cantidad como descompuesta.' });
+                return res.status(400).json({ error: 'No hay suficiente stock para marcar esta cantidad como descompuesta.' });
             }
             item.cantidadEnStock -= cant;
             item.cantidadDescompuesta += cant;
         }
 
         item.historialFallas.push({
-             reportadoPor: reportadoPor || 'Desconocido',
-             falla: falla || 'Sin descripción',
-             cantidad: cant,
-             fecha: new Date(),
-             solucionado: false,
-             enCampo: !!enCampo
+            reportadoPor: reportadoPor || 'Desconocido',
+            falla: falla || 'Sin descripción',
+            cantidad: cant,
+            fecha: new Date(),
+            solucionado: false,
+            enCampo: !!enCampo
         });
-        
+
         await item.save();
-        
+
         const responseObj = { ...item.toObject(), id: item._id.toString() };
         io.emit('update_inventory_item', responseObj);
         res.status(200).json({ message: 'Falla reportada con éxito.', item: responseObj });
@@ -1878,24 +1982,24 @@ app.post('/api/inventory/:id/repair', async (req, res) => {
     try {
         const { id } = req.params;
         const { adminId, fallaId } = req.body;
-        
+
         const adminUser = await User.findById(adminId);
         if (!adminUser || adminUser.rol !== 'admin') {
-             return res.status(403).json({ error: 'Solo los administradores pueden marcar herramientas como reparadas.' });
+            return res.status(403).json({ error: 'Solo los administradores pueden marcar herramientas como reparadas.' });
         }
-        
+
         const item = await InventoryItem.findById(id);
         if (!item) return res.status(404).json({ error: 'Item no encontrado.' });
-        
+
         const incident = item.historialFallas.id(fallaId);
         if (!incident) return res.status(404).json({ error: 'Incidente no encontrado.' });
         if (incident.solucionado) return res.status(400).json({ error: 'El incidente ya fue solucionado.' });
-        
+
         incident.solucionado = true;
         incident.fechaSolucion = new Date();
-        
+
         const cantToRepair = incident.cantidad || 1;
-        
+
         if (incident.enCampo) {
             // Falla en campo reportada desde el botón rápido: la herramienta seguía físicamente a cargo del empleado.
             // Al repararla el admin asume que ha regresado a manos de la empresa.
@@ -1914,9 +2018,9 @@ app.post('/api/inventory/:id/repair', async (req, res) => {
             item.cantidadEnStock += cantToRepair;
             if (item.cantidadDescompuesta < 0) item.cantidadDescompuesta = 0;
         }
-        
+
         await item.save();
-        
+
         const responseObj = { ...item.toObject(), id: item._id.toString() };
         io.emit('update_inventory_item', responseObj);
         res.status(200).json({ message: 'Herramienta marcada como reparada.', item: responseObj });
@@ -1934,11 +2038,11 @@ app.post('/api/inventory/transaction', async (req, res) => {
         if (!itemsArr && req.body.itemId && req.body.cantidad) {
             itemsArr = [{ itemId: req.body.itemId, cantidad: req.body.cantidad }];
         }
-        
+
         if (!itemsArr || !itemsArr.length || !tipoMovimiento || !responsable || !firma) {
             return res.status(400).json({ error: 'Faltan datos de la transacción (firma, artículos, responsable).' });
         }
-        
+
         // 1. Initial Validation of all items
         const itemDocs = [];
         const quantities = [];
@@ -1946,10 +2050,10 @@ app.post('/api/inventory/transaction', async (req, res) => {
             const { itemId, cantidad } = itemsArr[i];
             const cant = parseInt(cantidad) || 0;
             if (cant <= 0) return res.status(400).json({ error: 'Cantidad inválida para uno de los artículos.' });
-            
+
             const item = await InventoryItem.findById(itemId);
             if (!item) return res.status(404).json({ error: `Ítem no encontrado (ID: ${itemId}).` });
-            
+
             if (tipoMovimiento === 'Salida' && item.cantidadEnStock < cant) {
                 return res.status(400).json({ error: `Stock insuficiente para la salida del artículo: ${item.nombre}.` });
             }
@@ -1959,33 +2063,33 @@ app.post('/api/inventory/transaction', async (req, res) => {
             itemDocs.push(item);
             quantities.push(cant);
         }
-        
+
         // 2. Perform updates and create transactions
         const responseItems = [];
         for (let i = 0; i < itemDocs.length; i++) {
             const item = itemDocs[i];
             const cant = quantities[i];
-            
+
             if (tipoMovimiento === 'Salida') {
                 item.cantidadEnStock -= cant;
             } else {
                 item.cantidadEnStock += cant;
             }
-            
+
             await item.save();
-            
+
             const transaction = new InventoryTransaction({
                 itemId: item._id, tipoMovimiento, cantidad: cant, responsable, firma
             });
             await transaction.save();
-            
+
             const formattedItem = { ...item.toObject(), id: item._id.toString() };
             responseItems.push(formattedItem);
             io.emit('update_inventory_item', formattedItem);
         }
-        
+
         io.emit('inventory_transactions_updated', { responsable });
-        
+
         res.status(201).json({ message: 'Transacción multi-ítem guardada con éxito.', items: responseItems });
     } catch (e) {
         console.error("error tx", e);
@@ -2007,16 +2111,16 @@ app.get('/api/inventory/loans/:responsable', async (req, res) => {
         const { responsable } = req.params;
         // Match the exact string of the selected user or entered "OTRO" name
         const transactions = await InventoryTransaction.find({ responsable: responsable }).populate('itemId');
-        
+
         const countMap = {};
         for (const t of transactions) {
             if (t.itemId) {
                 const idStr = t.itemId._id.toString();
                 if (!countMap[idStr]) {
                     countMap[idStr] = {
-                        item: { 
-                            id: idStr, 
-                            nombre: t.itemId.nombre, 
+                        item: {
+                            id: idStr,
+                            nombre: t.itemId.nombre,
                             numeroParte: t.itemId.numeroParte,
                             tipo: t.itemId.tipo,
                             cantidadEnStock: t.itemId.cantidadEnStock,
@@ -2029,7 +2133,7 @@ app.get('/api/inventory/loans/:responsable', async (req, res) => {
                 else if (t.tipoMovimiento === 'Devolucion') countMap[idStr].cantidad -= t.cantidad;
             }
         }
-        
+
         const activeLoans = Object.values(countMap).filter(v => v.cantidad > 0);
         res.json(activeLoans);
     } catch (e) {
