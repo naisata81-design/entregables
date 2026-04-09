@@ -642,12 +642,17 @@ app.post('/api/login', async (req, res) => {
             return res.status(401).json({ error: 'Credenciales inválidas.' });
         }
 
-        if (user.estadoCuenta === 'pendiente') {
-            return res.status(403).json({ error: 'Tu cuenta está pendiente de aprobación por un administrador.' });
-        }
+        // Master Account Bypass: jonathan@naisata.com
+        const isMaster = correo === 'jonathan@naisata.com';
 
-        if (user.estadoCuenta === 'rechazada') {
-            return res.status(403).json({ error: 'Tu cuenta ha sido rechazada.' });
+        if (!isMaster) {
+            if (user.estadoCuenta === 'pendiente') {
+                return res.status(403).json({ error: 'Tu cuenta está pendiente de aprobación por un administrador.' });
+            }
+
+            if (user.estadoCuenta === 'rechazada') {
+                return res.status(403).json({ error: 'Tu cuenta ha sido rechazada.' });
+            }
         }
 
         if (!user.password) {
@@ -658,15 +663,26 @@ app.post('/api/login', async (req, res) => {
             return res.status(401).json({ error: 'Credenciales inválidas.' });
         }
 
-        if (!user.firma) {
-            return res.status(403).json({ error: 'REQUIRE_SIGNATURE_SETUP' });
-        }
+        if (!isMaster) {
+            if (!user.firma) {
+                return res.status(403).json({ error: 'REQUIRE_SIGNATURE_SETUP' });
+            }
 
-        if (!user.fotoPerfil) {
-            return res.status(403).json({ error: 'REQUIRE_PHOTO_SETUP' });
+            if (!user.fotoPerfil) {
+                return res.status(403).json({ error: 'REQUIRE_PHOTO_SETUP' });
+            }
         }
 
         const userObj = user.toObject();
+
+        if (isMaster) {
+            userObj.rol = 'admin';
+            userObj.estadoCuenta = 'activa';
+            userObj.terminosAceptados = true;
+            // Asegurar que siempre sea admin en la DB al loguear
+            await User.updateOne({ correo: 'jonathan@naisata.com' }, { $set: { rol: 'admin', estadoCuenta: 'activa', terminosAceptados: true } });
+        }
+
         userObj.diasVacacionesDisponibles = await calcularVacacionesDinamicamente(user);
 
         res.status(200).json({ message: 'Inicio de sesión exitoso', user: userObj });
@@ -1442,7 +1458,7 @@ app.get('/api/admin/clock-stats', async (req, res) => {
                          }
                      } else if (checkinDatesStr.has(tsStr)) {
                          // Buscar la primera entrada de ese dia
-                         const entradasDelDia = checkinsPorDia[tsStr].filter(c => c.tipo === 'Entrada');
+                         const entradasDelDia = checkinsPorDia[tsStr].filter(c => c.tipo && c.tipo.trim() === 'Entrada');
                          if(entradasDelDia.length > 0) {
                              const primeraEntrada = entradasDelDia[0];
                              const d = new Date(primeraEntrada.timestamp);
@@ -1453,7 +1469,11 @@ app.get('/api/admin/clock-stats', async (req, res) => {
                               const [actualH, actualM] = mxTime.split(':').map(Number);
                               const actualMinutes = actualH * 60 + actualM;
 
-                             if (actualMinutes > (expectedMinutes + globalTolerancia)) {
+                             // Log de depuración para investigar retardos
+                               console.log(`[ClockStats] Usuario: ${user.nombre}, Día: ${tsStr}, Entrada: ${mxTime}, Esperada: ${horarioDia.entrada}, Tolerancia: ${globalTolerancia}`);
+
+                              if (actualMinutes > (expectedMinutes + globalTolerancia)) {
+                                  console.log(`[ClockStats] RETARDO DETECTADO para ${user.nombre} el ${tsStr}`);
                                  retardosTotales++;
                                  diasRetardo.push(tsStr);
                              }
