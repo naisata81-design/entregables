@@ -193,7 +193,8 @@ const VehicleSchema = new mongoose.Schema({
     color: { type: String, required: true },
     placas: { type: String, required: true, unique: true },
     estado: { type: String, enum: ['Disponible', 'Prestado', 'Mantenimiento'], default: 'Disponible' },
-    bitacoraEsperada: { type: [String], default: ['Gato', 'Refacción', 'Cables auxiliares', 'Extintor'] }
+    bitacoraEsperada: { type: [String], default: ['Gato', 'Refacción', 'Cables auxiliares', 'Extintor'] },
+    lastDamageReport: { type: String, default: '' }
 }, { timestamps: true });
 const Vehicle = mongoose.model('Vehicle', VehicleSchema);
 
@@ -875,6 +876,9 @@ app.post('/api/vehicles/:id/return', async (req, res) => {
         if (vehicle.estado !== 'Prestado') return res.status(400).json({ error: 'El vehículo no está prestado actualmente.' });
         
         vehicle.estado = 'Disponible';
+        if (imgReporteDanos) {
+            vehicle.lastDamageReport = imgReporteDanos;
+        }
         await vehicle.save();
 
         const tx = new VehicleTransaction({
