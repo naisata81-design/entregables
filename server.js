@@ -1395,6 +1395,8 @@ app.get('/api/admin/clock-stats', async (req, res) => {
 
              let faltasTotales = 0;
              let retardosTotales = 0;
+             let diasFalta = [];
+             let diasRetardo = [];
              
              // Agrupar checkins por día
              const checkinsPorDia = {};
@@ -1429,6 +1431,7 @@ app.get('/api/admin/clock-stats', async (req, res) => {
                          // Solo contabiliza falta si el día ya terminó (iterDate es anterior a hoy)
                          if(iterDate < todayMidnight) {
                              faltasTotales++;
+                             diasFalta.push(tsStr);
                          }
                      } else if (checkinDatesStr.has(tsStr)) {
                          // Buscar la primera entrada de ese dia
@@ -1441,6 +1444,7 @@ app.get('/api/admin/clock-stats', async (req, res) => {
                              const actualMinutes = d.getHours() * 60 + d.getMinutes();
                              if (actualMinutes > (expectedMinutes + globalTolerancia)) {
                                  retardosTotales++;
+                                 diasRetardo.push(tsStr);
                              }
                          }
                      }
@@ -1452,6 +1456,8 @@ app.get('/api/admin/clock-stats', async (req, res) => {
                  empleado: `${user.nombre} ${user.apellido}`,
                  faltasTotales,
                  retardosTotales,
+                 diasFalta,
+                 diasRetardo,
                  historial: checkinsPorDia
              });
         }
