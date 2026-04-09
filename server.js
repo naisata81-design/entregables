@@ -1440,13 +1440,18 @@ app.get('/api/admin/clock-stats', async (req, res) => {
 
              let iterDate = new Date(startTrackingDate);
              while (iterDate <= hoy) {
-                 const dayOfWeek = iterDate.getDay();
-                 let horarioDia = (user.usaHorarioPersonalizado && user.horariosPorDia)
-                     ? user.horariosPorDia.find(h => h.dia === dayOfWeek)
-                     : globalHorarios.find(h => h.dia === dayOfWeek);
+                  // Normalizar iterDate al mediodía para evitar saltos de día por zona horaria
+                  iterDate.setHours(12, 0, 0, 0);
+                  const tsStr = iterDate.toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
+                  
+                  // Calcular el día de la semana basado en la fecha local de CDMX
+                  const dayOfWeek = new Date(iterDate.toLocaleString('en-US', { timeZone: 'America/Mexico_City' })).getDay();
+                  
+                  let horarioDia = (user.usaHorarioPersonalizado && user.horariosPorDia)
+                      ? user.horariosPorDia.find(h => h.dia === dayOfWeek)
+                      : globalHorarios.find(h => h.dia === dayOfWeek);
 
                  if (horarioDia && horarioDia.activo && horarioDia.entrada) {
-                     const tsStr = iterDate.toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
                      
                      if (!checkinDatesStr.has(tsStr) && !isVacation(iterDate)) {
                          const todayMidnight = new Date();
