@@ -804,10 +804,29 @@ app.delete('/api/companies/:id', async (req, res) => {
 // 4. Vehicles (Tracking)
 app.get('/api/vehicles', async (req, res) => {
     try {
-        const vehicles = await Vehicle.find().sort({ createdAt: -1 });
+        const vehicles = await Vehicle.find().select('-lastDamageReport').sort({ createdAt: -1 });
         res.json(vehicles);
     } catch (e) {
         res.status(500).json({ error: 'Error obteniendo vehículos.' });
+    }
+});
+
+app.get('/api/vehicles/:id', async (req, res) => {
+    try {
+        const v = await Vehicle.findById(req.params.id);
+        if (!v) return res.status(404).json({ error: 'No encontrado' });
+        res.json(v);
+    } catch (e) {
+        res.status(500).json({ error: 'Error obteniendo vehículo individual.' });
+    }
+});
+
+app.get('/api/vehicles/:id/last-loan', async (req, res) => {
+    try {
+        const tx = await VehicleTransaction.findOne({ vehicleId: req.params.id, tipoMovimiento: 'Préstamo' }).sort({ createdAt: -1 });
+        res.json(tx || {});
+    } catch (e) {
+        res.status(500).json({ error: 'Error interno' });
     }
 });
 
@@ -907,19 +926,9 @@ app.get('/api/users/:id/vehicles', async (req, res) => {
     try {
         const txs = await VehicleTransaction.find({ userId: req.params.id }).sort({ fecha: -1 }).populate('vehicleId');
         
-        const currentVehicles = [];
-        const checkedVehicles = new Set();
-        
-        for (let t of txs) {
-            if (!t.vehicleId) continue;
-            const vidStr = t.vehicleId._id.toString();
-            if (!checkedVehicles.has(vidStr)) {
-                if (t.tipoMovimiento === 'Préstamo') {
-                    currentVehicles.push(t.vehicleId);
-                }
-                checkedVehicles.add(vidStr);
-            }
-        }
+        // Uso de la nueva propiedad global del vehículo para evitar bucles visuales:
+        const currentVehicles = await Vehicle.find({ currentUserId: req.params.id });
+
         res.json({
             currentVehicles,
             history: txs
