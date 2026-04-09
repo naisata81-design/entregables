@@ -1407,7 +1407,8 @@ app.get('/api/admin/clock-stats', async (req, res) => {
              const checkinsPorDia = {};
              checkins.forEach(c => {
                  const d = new Date(c.timestamp);
-                 const dateStr = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+                 // Usar fecha local de CDMX para agrupar correctamente
+                 const dateStr = d.toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' }); 
                  if(!checkinsPorDia[dateStr]) checkinsPorDia[dateStr] = [];
                  checkinsPorDia[dateStr].push(c);
              });
@@ -1417,7 +1418,8 @@ app.get('/api/admin/clock-stats', async (req, res) => {
              const hoy = new Date();
              hoy.setHours(23, 59, 59, 999);
              
-             let startTrackingDate = new Date(user.fechaIngreso || hoy.getFullYear(), 0, 1);
+             // Corregido: Si existe fechaIngreso se usa directamente, si no se usa el inicio del año actual
+             let startTrackingDate = user.fechaIngreso ? new Date(user.fechaIngreso) : new Date(hoy.getFullYear(), 0, 1);
              startTrackingDate.setHours(0, 0, 0, 0);
 
              let iterDate = new Date(startTrackingDate);
@@ -1428,7 +1430,7 @@ app.get('/api/admin/clock-stats', async (req, res) => {
                      : globalHorarios.find(h => h.dia === dayOfWeek);
 
                  if (horarioDia && horarioDia.activo && horarioDia.entrada) {
-                     const tsStr = `${iterDate.getFullYear()}-${String(iterDate.getMonth()+1).padStart(2,'0')}-${String(iterDate.getDate()).padStart(2,'0')}`;
+                     const tsStr = iterDate.toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
                      
                      if (!checkinDatesStr.has(tsStr) && !isVacation(iterDate)) {
                          const todayMidnight = new Date();
@@ -1446,7 +1448,11 @@ app.get('/api/admin/clock-stats', async (req, res) => {
                              const d = new Date(primeraEntrada.timestamp);
                              const [h, m] = horarioDia.entrada.split(':').map(Number);
                              const expectedMinutes = h * 60 + m;
-                             const actualMinutes = d.getHours() * 60 + d.getMinutes();
+                             
+                              const mxTime = d.toLocaleTimeString('en-US', { timeZone: 'America/Mexico_City', hour12: false });
+                              const [actualH, actualM] = mxTime.split(':').map(Number);
+                              const actualMinutes = actualH * 60 + actualM;
+
                              if (actualMinutes > (expectedMinutes + globalTolerancia)) {
                                  retardosTotales++;
                                  diasRetardo.push(tsStr);
