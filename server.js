@@ -408,7 +408,7 @@ app.get('/api/users/:id/dashboard-stats', async (req, res) => {
         // 1. Calcular retardos históricos
         const checkins = await CheckIn.find({ userId: userId, tipo: 'Entrada' });
         let settings = await Settings.findOne({ tipo: 'timeclock' });
-        const globalTolerancia = settings ? settings.toleranciaMinutos : 15;
+        const globalTolerancia = settings ? Number(settings.toleranciaMinutos) || 15 : 15;
         const globalHorarios = settings ? settings.horariosPorDia : [];
 
         let retardosTotales = 0;
@@ -502,12 +502,12 @@ app.get('/api/users/:id/dashboard-stats', async (req, res) => {
         startTrackingDate.setHours(0, 0, 0, 0);
         let trackStartStr = `${startTrackingDate.getFullYear()}-${String(startTrackingDate.getMonth() + 1).padStart(2, '0')}-${String(startTrackingDate.getDate()).padStart(2, '0')}`;
 
-        const ayer = new Date();
-        ayer.setDate(ayer.getDate() - 1);
-        ayer.setHours(23, 59, 59, 999);
+        const hoyDateObj = new Date();
+        const hoyEnd = new Date();
+        hoyEnd.setHours(23, 59, 59, 999);
 
         let iterDate = new Date(startTrackingDate);
-        while (iterDate <= ayer) {
+        while (iterDate <= hoyEnd) {
             const dayOfWeek = iterDate.getDay();
             let horarioDia = (user.usaHorarioPersonalizado && user.horariosPorDia)
                 ? user.horariosPorDia.find(h => h.dia === dayOfWeek)
@@ -516,8 +516,13 @@ app.get('/api/users/:id/dashboard-stats', async (req, res) => {
             if (horarioDia && horarioDia.activo && horarioDia.entrada) {
                 const tsStr = `${iterDate.getFullYear()}-${String(iterDate.getMonth() + 1).padStart(2, '0')}-${String(iterDate.getDate()).padStart(2, '0')}`;
                 if (!checkinDates.has(tsStr) && !isVacation(iterDate)) {
-                    faltasTotales++;
-                    listaFaltas.push(tsStr);
+                    const todayMidnight = new Date();
+                    todayMidnight.setHours(0,0,0,0);
+                    // Solo cuenta falta si el día ya concluyó
+                    if(iterDate < todayMidnight) {
+                        faltasTotales++;
+                        listaFaltas.push(tsStr);
+                    }
                 }
             }
             iterDate.setDate(iterDate.getDate() + 1);
