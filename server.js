@@ -187,6 +187,28 @@ const InventoryTransactionSchema = new mongoose.Schema({
 }, { timestamps: true });
 const InventoryTransaction = mongoose.model('InventoryTransaction', InventoryTransactionSchema);
 
+const VehicleSchema = new mongoose.Schema({
+    marca: { type: String, required: true },
+    modelo: { type: String, required: true },
+    color: { type: String, required: true },
+    placas: { type: String, required: true, unique: true },
+    estado: { type: String, enum: ['Disponible', 'Prestado', 'Mantenimiento'], default: 'Disponible' },
+    bitacoraEsperada: { type: [String], default: ['Gato', 'Refacción', 'Cables auxiliares', 'Extintor'] }
+}, { timestamps: true });
+const Vehicle = mongoose.model('Vehicle', VehicleSchema);
+
+const VehicleTransactionSchema = new mongoose.Schema({
+    vehicleId: { type: mongoose.Schema.Types.ObjectId, ref: 'Vehicle', required: true },
+    userId: { type: String, required: true },
+    userName: { type: String, required: true },
+    tipoMovimiento: { type: String, enum: ['Préstamo', 'Devolución'], required: true },
+    fecha: { type: Date, default: Date.now },
+    notas: { type: String, default: '' },
+    bitacoraRevisada: { type: [String], default: [] },
+    imgReporteDanos: { type: String, default: '' } // Base64
+}, { timestamps: true });
+const VehicleTransaction = mongoose.model('VehicleTransaction', VehicleTransactionSchema);
+
 
 async function calcularVacacionesDinamicamente(user) {
     if (!user) return 0;
@@ -773,6 +795,127 @@ app.delete('/api/companies/:id', async (req, res) => {
         res.json({ message: 'Empresa eliminada correctamente' });
     } catch (e) {
         res.status(500).json({ error: 'Error eliminando empresa.' });
+    }
+});
+
+// 4. Vehicles (Tracking)
+app.get('/api/vehicles', async (req, res) => {
+    try {
+        const vehicles = await Vehicle.find().sort({ createdAt: -1 });
+        res.json(vehicles);
+    } catch (e) {
+        res.status(500).json({ error: 'Error obteniendo vehículos.' });
+    }
+});
+
+app.post('/api/vehicles', async (req, res) => {
+    try {
+        const { marca, modelo, color, placas, bitacoraEsperada } = req.body;
+        if (!marca || !modelo || !placas) return res.status(400).json({ error: 'Marca, modelo y placas son obligatorios.' });
+
+        const newVehicle = new Vehicle({ marca, modelo, color, placas, bitacoraEsperada });
+        await newVehicle.save();
+        res.status(201).json(newVehicle);
+    } catch (e) {
+        res.status(500).json({ error: 'Error interno registrando vehículo.' });
+    }
+});
+
+app.put('/api/vehicles/:id', async (req, res) => {
+    try {
+        const v = await Vehicle.findByIdAndUpdate(req.params.id, req.body, { new: true });
+        if(!v) return res.status(404).json({error: 'No encontrado'});
+        res.json(v);
+    } catch (e) {
+        res.status(500).json({ error: 'Error interno.' });
+    }
+});
+
+app.delete('/api/vehicles/:id', async (req, res) => {
+    try {
+        await Vehicle.findByIdAndDelete(req.params.id);
+        res.json({ message: 'Eliminado.' });
+    } catch(e) {
+        res.status(500).json({ error: 'Error interno.' });
+    }
+});
+
+// Vehicle Transactions (Loans/Returns)
+app.post('/api/vehicles/:id/loan', async (req, res) => {
+    try {
+        const { userId, userName, notas, bitacoraRevisada, imgReporteDanos } = req.body;
+        const vehicle = await Vehicle.findById(req.params.id);
+        if (!vehicle) return res.status(404).json({ error: 'Vehículo no encontrado.' });
+        if (vehicle.estado !== 'Disponible') return res.status(400).json({ error: 'El vehículo no está disponible.' });
+        
+        vehicle.estado = 'Prestado';
+        await vehicle.save();
+
+        const tx = new VehicleTransaction({
+            vehicleId: vehicle._id,
+            userId,
+            userName,
+            tipoMovimiento: 'Préstamo',
+            notas,
+            bitacoraRevisada,
+            imgReporteDanos
+        });
+        await tx.save();
+        res.status(200).json({ message: 'Vehículo asignado exitosamente.', transaction: tx });
+    } catch (e) {
+        res.status(500).json({ error: 'Error interno asignando.' });
+    }
+});
+
+app.post('/api/vehicles/:id/return', async (req, res) => {
+    try {
+        const { userId, userName, notas, bitacoraRevisada, imgReporteDanos } = req.body;
+        const vehicle = await Vehicle.findById(req.params.id);
+        if (!vehicle) return res.status(404).json({ error: 'Vehículo no encontrado.' });
+        if (vehicle.estado !== 'Prestado') return res.status(400).json({ error: 'El vehículo no está prestado actualmente.' });
+        
+        vehicle.estado = 'Disponible';
+        await vehicle.save();
+
+        const tx = new VehicleTransaction({
+            vehicleId: vehicle._id,
+            userId,
+            userName,
+            tipoMovimiento: 'Devolución',
+            notas,
+            bitacoraRevisada,
+            imgReporteDanos
+        });
+        await tx.save();
+        res.status(200).json({ message: 'Vehículo devuelto exitosamente.', transaction: tx });
+    } catch (e) {
+        res.status(500).json({ error: 'Error interno devolviendo.' });
+    }
+});
+
+app.get('/api/users/:id/vehicles', async (req, res) => {
+    try {
+        const txs = await VehicleTransaction.find({ userId: req.params.id }).sort({ fecha: -1 }).populate('vehicleId');
+        
+        const currentVehicles = [];
+        const checkedVehicles = new Set();
+        
+        for (let t of txs) {
+            if (!t.vehicleId) continue;
+            const vidStr = t.vehicleId._id.toString();
+            if (!checkedVehicles.has(vidStr)) {
+                if (t.tipoMovimiento === 'Préstamo') {
+                    currentVehicles.push(t.vehicleId);
+                }
+                checkedVehicles.add(vidStr);
+            }
+        }
+        res.json({
+            currentVehicles,
+            history: txs
+        });
+    } catch(e) {
+         res.status(500).json({ error: 'Error obteniendo historial de vehículo.' });
     }
 });
 
