@@ -1408,15 +1408,13 @@ app.get('/api/admin/clock-stats', async (req, res) => {
              const checkinDatesStr = new Set(Object.keys(checkinsPorDia));
              
              const hoy = new Date();
-             const ayer = new Date();
-             ayer.setDate(ayer.getDate() - 1);
-             ayer.setHours(23, 59, 59, 999);
+             hoy.setHours(23, 59, 59, 999);
              
              let startTrackingDate = new Date(user.fechaIngreso || hoy.getFullYear(), 0, 1);
              startTrackingDate.setHours(0, 0, 0, 0);
 
              let iterDate = new Date(startTrackingDate);
-             while (iterDate <= ayer) {
+             while (iterDate <= hoy) {
                  const dayOfWeek = iterDate.getDay();
                  let horarioDia = (user.usaHorarioPersonalizado && user.horariosPorDia)
                      ? user.horariosPorDia.find(h => h.dia === dayOfWeek)
@@ -1426,7 +1424,12 @@ app.get('/api/admin/clock-stats', async (req, res) => {
                      const tsStr = `${iterDate.getFullYear()}-${String(iterDate.getMonth()+1).padStart(2,'0')}-${String(iterDate.getDate()).padStart(2,'0')}`;
                      
                      if (!checkinDatesStr.has(tsStr) && !isVacation(iterDate)) {
-                         faltasTotales++;
+                         const todayMidnight = new Date();
+                         todayMidnight.setHours(0,0,0,0);
+                         // Solo contabiliza falta si el día ya terminó (iterDate es anterior a hoy)
+                         if(iterDate < todayMidnight) {
+                             faltasTotales++;
+                         }
                      } else if (checkinDatesStr.has(tsStr)) {
                          // Buscar la primera entrada de ese dia
                          const entradasDelDia = checkinsPorDia[tsStr].filter(c => c.tipo === 'Entrada');
