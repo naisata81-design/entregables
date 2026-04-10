@@ -44,9 +44,30 @@ const UserSchema = new mongoose.Schema({
     fotoPerfil: { type: String, default: '' },
     terminosAceptados: { type: Boolean, default: false },
     evidenciaTerminos: { type: String, default: '' },
-    estadoCuenta: { type: String, enum: ['pendiente', 'activa', 'rechazada'] }
+    estadoCuenta: { type: String, enum: ['pendiente', 'activa', 'rechazada'] },
+    numeroEmpleado: { type: Number, unique: true, sparse: true }
 }, { timestamps: true });
 const User = mongoose.model('User', UserSchema);
+
+// Run migration to assure numeroEmpleado
+async function asegurarNumeroEmpleado() {
+    try {
+        const usersSinNumero = await User.find({ numeroEmpleado: { $exists: false } }).sort({ createdAt: 1 });
+        if (usersSinNumero.length === 0) return;
+        
+        let maxEmpleado = await User.findOne({ numeroEmpleado: { $exists: true } }).sort({ numeroEmpleado: -1 });
+        let nextNumber = maxEmpleado && maxEmpleado.numeroEmpleado ? maxEmpleado.numeroEmpleado + 1 : 101;
+        
+        for (const u of usersSinNumero) {
+            u.numeroEmpleado = nextNumber++;
+            await u.save();
+        }
+        console.log(`Migración completada. Se asignaron ${usersSinNumero.length} números de empleado.`);
+    } catch (e) {
+        console.error('Error en migración numeroEmpleado:', e);
+    }
+}
+asegurarNumeroEmpleado();
 
 const SettingsSchema = new mongoose.Schema({
     tipo: { type: String, required: true, unique: true },
@@ -310,10 +331,14 @@ app.post('/api/register', async (req, res) => {
             return res.status(400).json({ error: 'El correo ya está registrado.' });
         }
 
+        let maxEmpleado = await User.findOne({ numeroEmpleado: { $exists: true } }).sort({ numeroEmpleado: -1 });
+        let nextNumber = maxEmpleado && maxEmpleado.numeroEmpleado ? maxEmpleado.numeroEmpleado + 1 : 101;
+
         const newUser = new User({
             nombre, apellido, correo, telefono, password, firma, fotoPerfil,
             fechaIngreso: fechaIngreso || new Date(),
-            estadoCuenta: 'pendiente'
+            estadoCuenta: 'pendiente',
+            numeroEmpleado: nextNumber
         });
         await newUser.save();
 
@@ -517,9 +542,9 @@ app.get('/api/users/:id/dashboard-stats', async (req, res) => {
                 const tsStr = `${iterDate.getFullYear()}-${String(iterDate.getMonth() + 1).padStart(2, '0')}-${String(iterDate.getDate()).padStart(2, '0')}`;
                 if (!checkinDates.has(tsStr) && !isVacation(iterDate)) {
                     const todayMidnight = new Date();
-                    todayMidnight.setHours(0,0,0,0);
+                    todayMidnight.setHours(0, 0, 0, 0);
                     // Solo cuenta falta si el día ya concluyó
-                    if(iterDate < todayMidnight) {
+                    if (iterDate < todayMidnight) {
                         faltasTotales++;
                         listaFaltas.push(tsStr);
                     }
@@ -1381,7 +1406,7 @@ app.get('/api/checkins/today/:userId', async (req, res) => {
     try {
         const today = new Date();
         today.setHours(0, 0, 0, 0);
-        const checkins = await CheckIn.find({ 
+        const checkins = await CheckIn.find({
             userId: req.params.userId,
             timestamp: { $gte: today }
         }).sort({ timestamp: 1 });
@@ -1398,104 +1423,104 @@ app.get('/api/admin/clock-stats', async (req, res) => {
         const settings = await Settings.findOne({ tipo: 'timeclock' });
         const globalHorarios = settings ? settings.horariosPorDia : [];
         const globalTolerancia = settings ? Number(settings.toleranciaMinutos) || 15 : 15;
-        
+
         let report = [];
-        
+
         for (const user of users) {
-             const userId = user._id.toString();
-             const checkins = await CheckIn.find({ userId }).sort({ timestamp: 1 });
-             const vacaciones = await VacationRequest.find({ userId: userId, estado: 'aprobada' });
-             
-             const isVacation = (dateObj) => {
-                 return vacaciones.some(v => {
-                     const start = new Date(v.fechaInicio); start.setHours(0, 0, 0, 0);
-                     const end = new Date(v.fechaFin); end.setHours(23, 59, 59, 999);
-                     return dateObj >= start && dateObj <= end;
-                 });
-             };
+            const userId = user._id.toString();
+            const checkins = await CheckIn.find({ userId }).sort({ timestamp: 1 });
+            const vacaciones = await VacationRequest.find({ userId: userId, estado: 'aprobada' });
 
-             let faltasTotales = 0;
-             let retardosTotales = 0;
-             let diasFalta = [];
-             let diasRetardo = [];
-             
-             // Agrupar checkins por día
-             const checkinsPorDia = {};
-             checkins.forEach(c => {
-                 const d = new Date(c.timestamp);
-                 // Usar fecha local de CDMX para agrupar correctamente
-                 const dateStr = d.toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' }); 
-                 if(!checkinsPorDia[dateStr]) checkinsPorDia[dateStr] = [];
-                 checkinsPorDia[dateStr].push(c);
-             });
+            const isVacation = (dateObj) => {
+                return vacaciones.some(v => {
+                    const start = new Date(v.fechaInicio); start.setHours(0, 0, 0, 0);
+                    const end = new Date(v.fechaFin); end.setHours(23, 59, 59, 999);
+                    return dateObj >= start && dateObj <= end;
+                });
+            };
 
-             const checkinDatesStr = new Set(Object.keys(checkinsPorDia));
-             
-             const hoy = new Date();
-             hoy.setHours(23, 59, 59, 999);
-             
-             // Corregido: Si existe fechaIngreso se usa directamente, si no se usa el inicio del año actual
-             let startTrackingDate = user.fechaIngreso ? new Date(user.fechaIngreso) : new Date(hoy.getFullYear(), 0, 1);
-             startTrackingDate.setHours(0, 0, 0, 0);
+            let faltasTotales = 0;
+            let retardosTotales = 0;
+            let diasFalta = [];
+            let diasRetardo = [];
 
-             let iterDate = new Date(startTrackingDate);
-             while (iterDate <= hoy) {
-                  // Normalizar iterDate al mediodía para evitar saltos de día por zona horaria
-                  iterDate.setHours(12, 0, 0, 0);
-                  const tsStr = iterDate.toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
-                  
-                  // Calcular el día de la semana basado en la fecha local de CDMX
-                  const dayOfWeek = new Date(iterDate.toLocaleString('en-US', { timeZone: 'America/Mexico_City' })).getDay();
-                  
-                  let horarioDia = (user.usaHorarioPersonalizado && user.horariosPorDia)
-                      ? user.horariosPorDia.find(h => h.dia === dayOfWeek)
-                      : globalHorarios.find(h => h.dia === dayOfWeek);
+            // Agrupar checkins por día
+            const checkinsPorDia = {};
+            checkins.forEach(c => {
+                const d = new Date(c.timestamp);
+                // Usar fecha local de CDMX para agrupar correctamente
+                const dateStr = d.toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
+                if (!checkinsPorDia[dateStr]) checkinsPorDia[dateStr] = [];
+                checkinsPorDia[dateStr].push(c);
+            });
 
-                 if (horarioDia && horarioDia.activo && horarioDia.entrada) {
-                     
-                     if (!checkinDatesStr.has(tsStr) && !isVacation(iterDate)) {
-                         const todayMidnight = new Date();
-                         todayMidnight.setHours(0,0,0,0);
-                         // Solo contabiliza falta si el día ya terminó (iterDate es anterior a hoy)
-                         if(iterDate < todayMidnight) {
-                             faltasTotales++;
-                             diasFalta.push(tsStr);
-                         }
-                     } else if (checkinDatesStr.has(tsStr)) {
-                         // Buscar la primera entrada de ese dia
-                         const entradasDelDia = checkinsPorDia[tsStr].filter(c => c.tipo && c.tipo.trim() === 'Entrada');
-                         if(entradasDelDia.length > 0) {
-                             const primeraEntrada = entradasDelDia[0];
-                             const d = new Date(primeraEntrada.timestamp);
-                             const [h, m] = horarioDia.entrada.split(':').map(Number);
-                             const expectedMinutes = h * 60 + m;
-                             
-                              const mxTime = d.toLocaleTimeString('en-US', { timeZone: 'America/Mexico_City', hour12: false });
-                              const [actualH, actualM] = mxTime.split(':').map(Number);
-                              const actualMinutes = actualH * 60 + actualM;
+            const checkinDatesStr = new Set(Object.keys(checkinsPorDia));
 
-                             // Log de depuración para investigar retardos
-                               console.log(`[ClockStats] Usuario: ${user.nombre}, Día: ${tsStr}, Entrada: ${mxTime}, Esperada: ${horarioDia.entrada}, Tolerancia: ${globalTolerancia}`);
+            const hoy = new Date();
+            hoy.setHours(23, 59, 59, 999);
 
-                              if (actualMinutes > (expectedMinutes + globalTolerancia)) {
-                                  console.log(`[ClockStats] RETARDO DETECTADO para ${user.nombre} el ${tsStr}`);
-                                 retardosTotales++;
-                                 diasRetardo.push(tsStr);
-                             }
-                         }
-                     }
-                 }
-                 iterDate.setDate(iterDate.getDate() + 1);
-             }
-             
-             report.push({
-                 empleado: `${user.nombre} ${user.apellido}`,
-                 faltasTotales,
-                 retardosTotales,
-                 diasFalta,
-                 diasRetardo,
-                 historial: checkinsPorDia
-             });
+            // Corregido: Si existe fechaIngreso se usa directamente, si no se usa el inicio del año actual
+            let startTrackingDate = user.fechaIngreso ? new Date(user.fechaIngreso) : new Date(hoy.getFullYear(), 0, 1);
+            startTrackingDate.setHours(0, 0, 0, 0);
+
+            let iterDate = new Date(startTrackingDate);
+            while (iterDate <= hoy) {
+                // Normalizar iterDate al mediodía para evitar saltos de día por zona horaria
+                iterDate.setHours(12, 0, 0, 0);
+                const tsStr = iterDate.toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
+
+                // Calcular el día de la semana basado en la fecha local de CDMX
+                const dayOfWeek = new Date(iterDate.toLocaleString('en-US', { timeZone: 'America/Mexico_City' })).getDay();
+
+                let horarioDia = (user.usaHorarioPersonalizado && user.horariosPorDia)
+                    ? user.horariosPorDia.find(h => h.dia === dayOfWeek)
+                    : globalHorarios.find(h => h.dia === dayOfWeek);
+
+                if (horarioDia && horarioDia.activo && horarioDia.entrada) {
+
+                    if (!checkinDatesStr.has(tsStr) && !isVacation(iterDate)) {
+                        const todayMidnight = new Date();
+                        todayMidnight.setHours(0, 0, 0, 0);
+                        // Solo contabiliza falta si el día ya terminó (iterDate es anterior a hoy)
+                        if (iterDate < todayMidnight) {
+                            faltasTotales++;
+                            diasFalta.push(tsStr);
+                        }
+                    } else if (checkinDatesStr.has(tsStr)) {
+                        // Buscar la primera entrada de ese dia
+                        const entradasDelDia = checkinsPorDia[tsStr].filter(c => c.tipo && c.tipo.trim() === 'Entrada');
+                        if (entradasDelDia.length > 0) {
+                            const primeraEntrada = entradasDelDia[0];
+                            const d = new Date(primeraEntrada.timestamp);
+                            const [h, m] = horarioDia.entrada.split(':').map(Number);
+                            const expectedMinutes = h * 60 + m;
+
+                            const mxTime = d.toLocaleTimeString('en-US', { timeZone: 'America/Mexico_City', hour12: false });
+                            const [actualH, actualM] = mxTime.split(':').map(Number);
+                            const actualMinutes = actualH * 60 + actualM;
+
+                            // Log de depuración para investigar retardos
+                            console.log(`[ClockStats] Usuario: ${user.nombre}, Día: ${tsStr}, Entrada: ${mxTime}, Esperada: ${horarioDia.entrada}, Tolerancia: ${globalTolerancia}`);
+
+                            if (actualMinutes > (expectedMinutes + globalTolerancia)) {
+                                console.log(`[ClockStats] RETARDO DETECTADO para ${user.nombre} el ${tsStr}`);
+                                retardosTotales++;
+                                diasRetardo.push(tsStr);
+                            }
+                        }
+                    }
+                }
+                iterDate.setDate(iterDate.getDate() + 1);
+            }
+
+            report.push({
+                empleado: `${user.nombre} ${user.apellido}`,
+                faltasTotales,
+                retardosTotales,
+                diasFalta,
+                diasRetardo,
+                historial: checkinsPorDia
+            });
         }
         res.json(report);
     } catch (e) {
@@ -2184,6 +2209,53 @@ app.get('/api/inventory/loans/:responsable', async (req, res) => {
     } catch (e) {
         console.error("Error obteniendo prestamos: ", e);
         res.status(500).json({ error: 'Error obteniendo préstamos activos.' });
+    }
+});
+
+// --- ZKTeco ADMS Endpoint ---
+app.post('/api/zk-checkin', async (req, res) => {
+    try {
+        const { authorization } = req.headers;
+        if (authorization !== 'Naisata_ZK_Secr3t_2026') {
+            return res.status(401).json({ error: 'No autorizado / Token inválido' });
+        }
+
+        const { numeroEmpleado, timestamp, tipo } = req.body;
+        if (!numeroEmpleado || !timestamp) {
+            return res.status(400).json({ error: 'Faltan datos de asistencia (numeroEmpleado o timestamp)' });
+        }
+
+        const user = await User.findOne({ numeroEmpleado: Number(numeroEmpleado) });
+        if (!user) {
+            return res.status(404).json({ error: `Usuario con número de empleado ${numeroEmpleado} no encontrado.` });
+        }
+
+        // Determinar "Entrada" o "Salida" según el 'tipo' devuelto (o default Entrada)
+        // Normalmente ZK manda un status que se traduce, pero asumiremos 'Entrada' si no lo mandan o si es 0, 'Salida' si es 1
+        let checkInType = 'Entrada';
+        if (tipo === '0') checkInType = 'Entrada';
+        if (tipo === '1') checkInType = 'Salida';
+
+        const checkinDate = new Date(timestamp);
+
+        const newCheckIn = new CheckIn({
+            userId: user._id.toString(),
+            userName: `${user.nombre} ${user.apellido}`,
+            tipo: checkInType,
+            servicio: 'Oficina (ZK Biométrico)',
+            ubicacion: { lat: 0, lng: 0 },
+            timestamp: checkinDate
+        });
+        
+        await newCheckIn.save();
+
+        // Emit socket to UI
+        io.emit('new_checkin', newCheckIn);
+
+        res.status(201).json({ message: 'Asistencia registrada correctamente.', checkIn: newCheckIn });
+    } catch (e) {
+        console.error('Error procesando ZK CheckIn:', e);
+        res.status(500).json({ error: 'Error del servidor procesando ZK CheckIn' });
     }
 });
 
