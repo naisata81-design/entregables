@@ -1432,11 +1432,11 @@ app.get('/api/admin/clock-stats', async (req, res) => {
             const checkins = await CheckIn.find({ userId }).sort({ timestamp: 1 });
             const vacaciones = await VacationRequest.find({ userId: userId, estado: 'aprobada' });
 
-            const isVacation = (dateObj) => {
+            const isVacation = (dateStr) => {
                 return vacaciones.some(v => {
-                    const start = new Date(v.fechaInicio); start.setHours(0, 0, 0, 0);
-                    const end = new Date(v.fechaFin); end.setHours(23, 59, 59, 999);
-                    return dateObj >= start && dateObj <= end;
+                    const startStr = new Date(v.fechaInicio).toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
+                    const endStr = new Date(v.fechaFin).toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
+                    return dateStr >= startStr && dateStr <= endStr;
                 });
             };
 
@@ -1477,9 +1477,9 @@ app.get('/api/admin/clock-stats', async (req, res) => {
                     ? user.horariosPorDia.find(h => h.dia === dayOfWeek)
                     : globalHorarios.find(h => h.dia === dayOfWeek);
 
-                if (horarioDia && horarioDia.activo && horarioDia.entrada) {
+                if (horarioDia && horarioDia.activo && horarioDia.entrada && !isVacation(tsStr)) {
 
-                    if (!checkinDatesStr.has(tsStr) && !isVacation(iterDate)) {
+                    if (!checkinDatesStr.has(tsStr)) {
                         const todayMidnight = new Date();
                         todayMidnight.setHours(0, 0, 0, 0);
                         // Solo contabiliza falta si el día ya terminó (iterDate es anterior a hoy)
@@ -1487,7 +1487,7 @@ app.get('/api/admin/clock-stats', async (req, res) => {
                             faltasTotales++;
                             diasFalta.push(tsStr);
                         }
-                    } else if (checkinDatesStr.has(tsStr)) {
+                    } else {
                         // Buscar la primera entrada de ese dia
                         const entradasDelDia = checkinsPorDia[tsStr].filter(c => c.tipo && c.tipo.trim() === 'Entrada');
                         if (entradasDelDia.length > 0) {
@@ -1500,13 +1500,20 @@ app.get('/api/admin/clock-stats', async (req, res) => {
                             const [actualH, actualM] = mxTime.split(':').map(Number);
                             const actualMinutes = actualH * 60 + actualM;
 
-                            // Log de depuración para investigar retardos
-                            console.log(`[ClockStats] Usuario: ${user.nombre}, Día: ${tsStr}, Entrada: ${mxTime}, Esperada: ${horarioDia.entrada}, Tolerancia: ${globalTolerancia}`);
-
                             if (actualMinutes > (expectedMinutes + globalTolerancia)) {
                                 console.log(`[ClockStats] RETARDO DETECTADO para ${user.nombre} el ${tsStr}`);
                                 retardosTotales++;
                                 diasRetardo.push(tsStr);
+                            }
+                        } else {
+                            // [NUEVO] Caso Escape: Tiene registros (ej. Salidas) pero nunca marcó Entrada
+                            const todayMidnight = new Date();
+                            todayMidnight.setHours(0, 0, 0, 0);
+                            // Solo contabilizamos falta por "Falta de entrada" si el día ya no es modificable/en curso
+                            if (iterDate < todayMidnight) {
+                                console.log(`[ClockStats] FALTA (Fuga de Entrada) para ${user.nombre} el ${tsStr}`);
+                                faltasTotales++;
+                                diasFalta.push(tsStr);
                             }
                         }
                     }
