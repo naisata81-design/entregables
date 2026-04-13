@@ -88,7 +88,8 @@ const AvisoSchema = new mongoose.Schema({
     imagen: { type: String, default: '' },
     fechaInicio: { type: Date, required: true },
     fechaFin: { type: Date, required: true },
-    activo: { type: Boolean, default: true }
+    activo: { type: Boolean, default: true },
+    requiereActualizacion: { type: Boolean, default: false }
 }, { timestamps: true });
 const Aviso = mongoose.model('Aviso', AvisoSchema);
 
