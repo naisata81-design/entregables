@@ -41,6 +41,7 @@ const UserSchema = new mongoose.Schema({
     }],
     diasVacacionesDisponibles: { type: Number, default: 0 },
     fechaIngreso: { type: Date, default: () => new Date(new Date().getFullYear(), 0, 1) },
+    fechaReinicioAsistencia: { type: Date },
     fotoPerfil: { type: String, default: '' },
     terminosAceptados: { type: Boolean, default: false },
     evidenciaTerminos: { type: String, default: '' },
@@ -1459,8 +1460,8 @@ app.get('/api/admin/clock-stats', async (req, res) => {
             const hoy = new Date();
             hoy.setHours(23, 59, 59, 999);
 
-            // Corregido: Si existe fechaIngreso se usa directamente, si no se usa el inicio del año actual
-            let startTrackingDate = user.fechaIngreso ? new Date(user.fechaIngreso) : new Date(hoy.getFullYear(), 0, 1);
+            // Corregido: Si existe fechaReinicioAsistencia se usa como punto de partida superior. Luego fechaIngreso, si no inicio del año.
+            let startTrackingDate = user.fechaReinicioAsistencia ? new Date(user.fechaReinicioAsistencia) : (user.fechaIngreso ? new Date(user.fechaIngreso) : new Date(hoy.getFullYear(), 0, 1));
             startTrackingDate.setHours(0, 0, 0, 0);
 
             let iterDate = new Date(startTrackingDate);
@@ -1514,6 +1515,7 @@ app.get('/api/admin/clock-stats', async (req, res) => {
             }
 
             report.push({
+                userId: user._id.toString(),
                 empleado: `${user.nombre} ${user.apellido}`,
                 faltasTotales,
                 retardosTotales,
@@ -1526,6 +1528,24 @@ app.get('/api/admin/clock-stats', async (req, res) => {
     } catch (e) {
         console.error('Error stats admin:', e);
         res.status(500).json({ error: 'Error procesando stats.' });
+    }
+});
+
+// Endpoint para reiniciar inasistencias y retardos
+app.post('/api/admin/reset-attendance', async (req, res) => {
+    try {
+        const { userId } = req.body;
+        if (!userId) return res.status(400).json({ error: 'Falta parametro userId' });
+
+        if (userId === 'all') {
+            await User.updateMany({}, { $set: { fechaReinicioAsistencia: new Date() } });
+        } else {
+            await User.findByIdAndUpdate(userId, { $set: { fechaReinicioAsistencia: new Date() } });
+        }
+        res.json({ message: 'Asistencias reseteadas exitosamente' });
+    } catch (e) {
+        console.error('Error reseteando asistencias:', e);
+        res.status(500).json({ error: 'Error interno reseteando asistencias' });
     }
 });
 
@@ -2238,12 +2258,15 @@ app.post('/api/zk-checkin', async (req, res) => {
 
         const checkinDate = new Date(timestamp);
 
+        const fingerprintSvg = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="250" height="250" style="background:%230f172a;"><circle cx="125" cy="100" r="45" fill="none" stroke="%233b82f6" stroke-width="8"/><circle cx="125" cy="100" r="25" fill="none" stroke="%233b82f6" stroke-width="8"/><text x="50%" y="78%" dominant-baseline="middle" text-anchor="middle" fill="white" font-family="Arial, sans-serif" font-weight="bold" font-size="24">ZKTeco</text><text x="50%" y="90%" dominant-baseline="middle" text-anchor="middle" fill="%2394a3b8" font-family="Arial, sans-serif" font-size="16">Verificado por Huella</text></svg>';
+
         const newCheckIn = new CheckIn({
             userId: user._id.toString(),
             userName: `${user.nombre} ${user.apellido}`,
             tipo: checkInType,
             servicio: 'Oficina (ZK Biométrico)',
             ubicacion: { lat: 0, lng: 0 },
+            foto: fingerprintSvg,
             timestamp: checkinDate
         });
         
