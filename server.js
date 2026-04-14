@@ -5,6 +5,12 @@ const multer = require('multer');
 const mongoose = require('mongoose');
 const http = require('http');
 const { Server } = require('socket.io');
+const webpush = require('web-push');
+
+// Configuración Web Push (VAPID)
+const VAPID_PUBLIC_KEY = 'BJvKenaUsLTNY_QxgZy1Md3kIiRVNCS05ql5F5mrdgPYZY5A9xyYeeuraXFGrNnVtvG--hFJLM0qWKKUdmboYEU';
+const VAPID_PRIVATE_KEY = 'qMSDE_bohcrQBpKhYRXJ_Zb80eRuSOnx4dK9PmxUsEQ';
+webpush.setVapidDetails('mailto:soporte@naisata.com', VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
 
 const app = express();
 const server = http.createServer(app);
@@ -92,6 +98,13 @@ const AvisoSchema = new mongoose.Schema({
     requiereActualizacion: { type: Boolean, default: false }
 }, { timestamps: true });
 const Aviso = mongoose.model('Aviso', AvisoSchema);
+
+const PushSubscriptionSchema = new mongoose.Schema({
+    userId: { type: String, required: true },
+    role: { type: String, default: 'normal' },
+    subscription: { type: Object, required: true }
+}, { timestamps: true });
+const PushSubscription = mongoose.model('PushSubscription', PushSubscriptionSchema);
 
 const CompanySchema = new mongoose.Schema({
     nombre: String,
@@ -181,6 +194,7 @@ const PlanMarker = mongoose.model('PlanMarker', PlanMarkerSchema);
 
 const InventoryItemSchema = new mongoose.Schema({
     cantidadEnStock: { type: Number, default: 0 },
+    unidad: { type: String, enum: ['piezas', 'metros'], default: 'piezas' },
     tipo: { type: String, enum: ['Insumo', 'Herramienta'], required: true },
     nombre: { type: String, required: true },
     categoria: { type: String, default: '' },
@@ -302,13 +316,71 @@ async function calcularVacacionesDinamicamente(user) {
     return Math.max(0, diasBase - consumidos);
 }
 
+// --- Helper Functions para Web Push ---
+async function sendPushNotification(subscription, payload) {
+    try {
+        await webpush.sendNotification(subscription, JSON.stringify(payload));
+    } catch (e) {
+        if (e.statusCode === 410 || e.statusCode === 404) {
+            await PushSubscription.deleteOne({ 'subscription.endpoint': subscription.endpoint });
+        } else {
+            console.error('Error enviando push:', e);
+        }
+    }
+}
+
+async function notifyAdmins(payload) {
+    const adminSubs = await PushSubscription.find({ role: 'admin' });
+    for (const sub of adminSubs) {
+        await sendPushNotification(sub.subscription, payload);
+    }
+}
+
+async function notifyUser(userId, payload) {
+    const userSubs = await PushSubscription.find({ userId });
+    for (const sub of userSubs) {
+        await sendPushNotification(sub.subscription, payload);
+    }
+}
+
+async function notifyAll(payload) {
+    const allSubs = await PushSubscription.find({});
+    for (const sub of allSubs) {
+        await sendPushNotification(sub.subscription, payload);
+    }
+}
+
+async function notifyUserByName(fullName, payload) {
+    const users = await User.find({});
+    const targetUser = users.find(u => `${u.nombre} ${u.apellido}`.trim().toLowerCase() === fullName.trim().toLowerCase());
+    if (targetUser) {
+        await notifyUser(targetUser._id.toString(), payload);
+    }
+}
+
 // CORS Update para permitir solicitudes desde el front hospedado en otro sitio
 app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads'))); // Exponer la carpeta de subidas en la raíz
 
-// --- Endpoints ---
+// --- Endpoints Notificaciones Web Push ---
+app.post('/api/notifications/subscribe', async (req, res) => {
+    try {
+        const { userId, role, subscription } = req.body;
+        if (!userId || !subscription) return res.status(400).json({ error: 'Faltan parámetros' });
+        
+        await PushSubscription.findOneAndUpdate(
+            { 'subscription.endpoint': subscription.endpoint }, // Si el endpoint existe, actualízalo
+            { userId, role, subscription },
+            { upsert: true, new: true }
+        );
+        res.status(201).json({ message: 'Suscrito con éxito' });
+    } catch (e) {
+        console.error('Error suscribiendo a push:', e);
+        res.status(500).json({ error: 'Error del servidor' });
+    }
+});
 
 // 1. Registro (Register)
 app.post('/api/register', async (req, res) => {
@@ -933,6 +1005,12 @@ app.post('/api/vehicles/:id/loan', async (req, res) => {
             imgReporteDanos
         });
         await tx.save();
+        
+        notifyUser(userId, {
+            title: "Vehículo Asignado",
+            body: `Se te ha asignado el vehículo de manera oficial. Por favor, revisa la bitácora.`
+        });
+        
         res.status(200).json({ message: 'Vehículo asignado exitosamente.', transaction: tx });
     } catch (e) {
         res.status(500).json({ error: 'Error interno asignando.' });
@@ -1674,6 +1752,12 @@ app.post('/api/vacations', async (req, res) => {
         });
 
         await newRequest.save();
+
+        notifyAdmins({
+            title: "Nueva Solicitud de Vacaciones",
+            body: `${userName} ha solicitado ${diasSolicitados} días libres.`
+        });
+
         res.status(201).json(newRequest);
     } catch (e) {
         res.status(500).json({ error: 'Error guardando solicitud de vacaciones.' });
@@ -1747,7 +1831,7 @@ app.get('/api/avisos', async (req, res) => {
 
 app.post('/api/avisos', async (req, res) => {
     try {
-        const { titulo, mensaje, imagen, fechaInicio, fechaFin } = req.body;
+        const { titulo, mensaje, imagen, fechaInicio, fechaFin, requiereActualizacion } = req.body;
         if (!titulo || !mensaje || !fechaInicio || !fechaFin) {
             return res.status(400).json({ error: 'Título, mensaje, fecha inicio y fin son obligatorios.' });
         }
@@ -1757,9 +1841,16 @@ app.post('/api/avisos', async (req, res) => {
             mensaje,
             imagen,
             fechaInicio: new Date(fechaInicio + "T00:00:00"),
-            fechaFin: new Date(fechaFin + "T23:59:59")
+            fechaFin: new Date(fechaFin + "T23:59:59"),
+            requiereActualizacion
         });
         await nuevoAviso.save();
+        
+        notifyAll({
+            title: `Aviso: ${titulo}`,
+            body: mensaje
+        });
+
         res.status(201).json(nuevoAviso);
     } catch (e) {
         console.error('Error insertando aviso:', e);
@@ -1805,6 +1896,12 @@ app.put('/api/vacations/:id/status', async (req, res) => {
         }
 
         await request.save();
+        
+        notifyUser(request.userId, {
+            title: "Actualización de Solicitud",
+            body: `Tu solicitud de vacaciones ha sido ${estado.toUpperCase()}.`
+        });
+
         res.json(request);
     } catch (e) {
         res.status(500).json({ error: 'Error actualizando estado de la solicitud.' });
@@ -1831,6 +1928,12 @@ app.post('/api/projects', async (req, res) => {
         await newProject.save();
         const responseObj = { ...newProject.toObject(), id: newProject._id.toString() };
         io.emit('new_project', responseObj);
+        
+        notifyAll({
+            title: "Nuevo Proyecto Documental",
+            body: `Se ha abierto un nuevo archivo de proyecto: ${nombre}.`
+        });
+
         res.status(201).json(responseObj);
     } catch (e) {
         res.status(500).json({ error: 'Error agregando proyecto.' });
@@ -1861,6 +1964,12 @@ app.post('/api/plans', upload.single('imagen'), async (req, res) => {
 
         const responseObj = { ...newPlan.toObject(), id: newPlan._id.toString() };
         io.emit('new_plan', responseObj);
+        
+        notifyAll({
+            title: "Nuevo Plano Asignado",
+            body: `Se ha subido el plano "${nombre}" a los documentos de proyecto.`
+        });
+
         res.status(201).json(responseObj);
     } catch (e) {
         res.status(500).json({ error: 'Error interno guardando plano.' });
@@ -1958,7 +2067,7 @@ app.get('/api/inventory', async (req, res) => {
 
 app.post('/api/inventory', async (req, res) => {
     try {
-        let { tipo, nombre, categoria, numeroParte, marca, ubicacion, cantidadEnStock } = req.body;
+        let { tipo, nombre, categoria, numeroParte, marca, ubicacion, cantidadEnStock, unidad } = req.body;
 
         if (!tipo || !nombre) {
             return res.status(400).json({ error: 'Falta tipo o nombre del ítem.' });
@@ -1984,7 +2093,7 @@ app.post('/api/inventory', async (req, res) => {
         cantidadEnStock = parseInt(cantidadEnStock) || 0;
 
         const newItem = new InventoryItem({
-            tipo, nombre, categoria, numeroParte, marca, ubicacion, cantidadEnStock
+            tipo, nombre, categoria, numeroParte, marca, ubicacion, cantidadEnStock, unidad: unidad || 'piezas'
         });
         await newItem.save();
 
@@ -2002,7 +2111,7 @@ app.post('/api/inventory', async (req, res) => {
 app.put('/api/inventory/:id', async (req, res) => {
     try {
         const { id } = req.params;
-        let { tipo, nombre, categoria, numeroParte, marca, ubicacion, cantidadEnStock } = req.body;
+        let { tipo, nombre, categoria, numeroParte, marca, ubicacion, cantidadEnStock, unidad } = req.body;
 
         const item = await InventoryItem.findById(id);
         if (!item) return res.status(404).json({ error: 'Item no encontrado.' });
@@ -2010,6 +2119,7 @@ app.put('/api/inventory/:id', async (req, res) => {
         if (tipo) item.tipo = tipo.toUpperCase() === 'HERRAMIENTA' ? 'Herramienta' : 'Insumo';
         if (nombre) item.nombre = nombre.toUpperCase();
         if (categoria !== undefined) item.categoria = categoria;
+        if (unidad !== undefined) item.unidad = unidad;
         if (numeroParte) item.numeroParte = numeroParte.toUpperCase();
         if (marca !== undefined) item.marca = marca.toUpperCase();
         if (ubicacion !== undefined) item.ubicacion = ubicacion.toUpperCase();
@@ -2144,6 +2254,7 @@ app.post('/api/inventory/transaction', async (req, res) => {
         // 1. Initial Validation of all items
         const itemDocs = [];
         const quantities = [];
+        const txItemsArr = [];
         for (let i = 0; i < itemsArr.length; i++) {
             const { itemId, cantidad } = itemsArr[i];
             const cant = parseInt(cantidad) || 0;
@@ -2160,6 +2271,7 @@ app.post('/api/inventory/transaction', async (req, res) => {
             }
             itemDocs.push(item);
             quantities.push(cant);
+            txItemsArr.push({ itemId: item._id, cantidad: cant });
         }
 
         // 2. Perform updates and create transactions
@@ -2176,14 +2288,22 @@ app.post('/api/inventory/transaction', async (req, res) => {
 
             await item.save();
 
-            const transaction = new InventoryTransaction({
-                itemId: item._id, tipoMovimiento, cantidad: cant, responsable, firma
-            });
-            await transaction.save();
-
             const formattedItem = { ...item.toObject(), id: item._id.toString() };
             responseItems.push(formattedItem);
             io.emit('update_inventory_item', formattedItem);
+        }
+
+        const txParams = {
+            tipoMovimiento, responsable, firma, fecha: new Date(), items: txItemsArr
+        };
+        const tx = new InventoryTransaction(txParams);
+        await tx.save();
+        
+        if (tipoMovimiento === 'Salida') {
+            notifyUserByName(responsable, {
+                title: "Asignación de Inventario",
+                body: `Se te han asignado herramientas. Revisa tu almacén personal.`
+            });
         }
 
         io.emit('inventory_transactions_updated', { responsable });
