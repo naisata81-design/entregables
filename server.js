@@ -504,31 +504,83 @@ app.get('/api/users/:id/dashboard-stats', async (req, res) => {
 
         const fullName = `${user.nombre} ${user.apellido}`;
 
-        // 1. Calcular retardos históricos
-        const checkins = await CheckIn.find({ userId: userId, tipo: 'Entrada' });
+        // 1. Calcular Asistencias (Retardos y Faltas) históricos
+        const checkins = await CheckIn.find({ userId: userId }).sort({ timestamp: 1 });
         let settings = await Settings.findOne({ tipo: 'timeclock' });
         const globalTolerancia = settings ? Number(settings.toleranciaMinutos) || 15 : 15;
         const globalHorarios = settings ? settings.horariosPorDia : [];
 
         let retardosTotales = 0;
-        for (const checkin of checkins) {
-            const date = new Date(checkin.timestamp);
-            const dayOfWeek = date.getDay();
-            let horarioDia;
-            if (user.usaHorarioPersonalizado && user.horariosPorDia) {
-                horarioDia = user.horariosPorDia.find(h => h.dia === dayOfWeek);
-            } else {
-                horarioDia = globalHorarios.find(h => h.dia === dayOfWeek);
-            }
+        let faltasTotales = 0;
+        let listaFaltas = [];
 
-            if (horarioDia && horarioDia.activo && horarioDia.entrada) {
-                const [h, m] = horarioDia.entrada.split(':').map(Number);
-                const entryTimeMinutes = h * 60 + m;
-                const checkinTimeMinutes = date.getHours() * 60 + date.getMinutes();
-                if (checkinTimeMinutes > (entryTimeMinutes + globalTolerancia)) {
-                    retardosTotales++;
+        const vacacionesAprobadas = await VacationRequest.find({ userId: userId, estado: 'aprobada' });
+        const isVacation = (dateStr) => {
+            return vacacionesAprobadas.some(v => {
+                const startStr = new Date(v.fechaInicio).toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
+                const endStr = new Date(v.fechaFin).toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
+                return dateStr >= startStr && dateStr <= endStr;
+            });
+        };
+
+        const checkinsPorDia = {};
+        checkins.forEach(c => {
+            const d = new Date(c.timestamp);
+            const dateStr = d.toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
+            if (!checkinsPorDia[dateStr]) checkinsPorDia[dateStr] = [];
+            checkinsPorDia[dateStr].push(c);
+        });
+
+        const checkinDatesStr = new Set(Object.keys(checkinsPorDia));
+        const hoyDateObj = new Date();
+
+        let startTrackingDate = user.fechaReinicioAsistencia ? new Date(user.fechaReinicioAsistencia) : (user.fechaIngreso ? new Date(user.fechaIngreso) : new Date(hoyDateObj.getFullYear(), 0, 1));
+        startTrackingDate.setHours(0, 0, 0, 0);
+
+        let iterDate = new Date(startTrackingDate);
+        while (iterDate <= hoyDateObj) {
+            iterDate.setHours(12, 0, 0, 0);
+            const tsStr = iterDate.toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
+            const dayOfWeek = new Date(iterDate.toLocaleString('en-US', { timeZone: 'America/Mexico_City' })).getDay();
+
+            let horarioDia = (user.usaHorarioPersonalizado && user.horariosPorDia)
+                ? user.horariosPorDia.find(h => h.dia === dayOfWeek)
+                : globalHorarios.find(h => h.dia === dayOfWeek);
+
+            if (horarioDia && horarioDia.activo && horarioDia.entrada && !isVacation(tsStr)) {
+                if (!checkinDatesStr.has(tsStr)) {
+                    const todayMidnight = new Date();
+                    todayMidnight.setHours(0, 0, 0, 0);
+                    if (iterDate < todayMidnight) {
+                        faltasTotales++;
+                        listaFaltas.push(tsStr);
+                    }
+                } else {
+                    const entradasDelDia = checkinsPorDia[tsStr].filter(c => c.tipo && c.tipo.trim() === 'Entrada');
+                    if (entradasDelDia.length > 0) {
+                        const primeraEntrada = entradasDelDia[0];
+                        const d = new Date(primeraEntrada.timestamp);
+                        const [h, m] = horarioDia.entrada.split(':').map(Number);
+                        const expectedMinutes = h * 60 + m;
+
+                        const mxTime = d.toLocaleTimeString('en-US', { timeZone: 'America/Mexico_City', hour12: false });
+                        const [actualH, actualM] = mxTime.split(':').map(Number);
+                        const actualMinutes = actualH * 60 + actualM;
+
+                        if (actualMinutes > (expectedMinutes + globalTolerancia)) {
+                            retardosTotales++;
+                        }
+                    } else {
+                        const todayMidnight = new Date();
+                        todayMidnight.setHours(0, 0, 0, 0);
+                        if (iterDate < todayMidnight) {
+                            faltasTotales++;
+                            listaFaltas.push(tsStr);
+                        }
+                    }
                 }
             }
+            iterDate.setDate(iterDate.getDate() + 1);
         }
 
         // 2. Calcular herramientas prestadas al empleado (Inventario Actual)
@@ -575,57 +627,7 @@ app.get('/api/users/:id/dashboard-stats', async (req, res) => {
 
         const diasVacacionesDisponiblesCalc = await calcularVacacionesDinamicamente(user);
 
-        // 4. Calcular faltas históricas
-        let faltasTotales = 0;
-        let listaFaltas = [];
-        const vacacionesAprobadas = await VacationRequest.find({ userId: userId, estado: 'aprobada' });
 
-        const isVacation = (dateObj) => {
-            return vacacionesAprobadas.some(v => {
-                const start = new Date(v.fechaInicio); start.setHours(0, 0, 0, 0);
-                const end = new Date(v.fechaFin); end.setHours(23, 59, 59, 999);
-                return dateObj >= start && dateObj <= end;
-            });
-        };
-
-        const checkinDates = new Set();
-        for (const c of checkins) {
-            const d = new Date(c.timestamp);
-            checkinDates.add(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
-        }
-
-        const hoy = new Date();
-        const ingreso = user.fechaIngreso ? new Date(user.fechaIngreso) : new Date(hoy.getFullYear(), 0, 1);
-
-        let startTrackingDate = new Date(user.createdAt || hoy);
-        startTrackingDate.setHours(0, 0, 0, 0);
-        let trackStartStr = `${startTrackingDate.getFullYear()}-${String(startTrackingDate.getMonth() + 1).padStart(2, '0')}-${String(startTrackingDate.getDate()).padStart(2, '0')}`;
-
-        const hoyDateObj = new Date();
-        const hoyEnd = new Date();
-        hoyEnd.setHours(23, 59, 59, 999);
-
-        let iterDate = new Date(startTrackingDate);
-        while (iterDate <= hoyEnd) {
-            const dayOfWeek = iterDate.getDay();
-            let horarioDia = (user.usaHorarioPersonalizado && user.horariosPorDia)
-                ? user.horariosPorDia.find(h => h.dia === dayOfWeek)
-                : globalHorarios.find(h => h.dia === dayOfWeek);
-
-            if (horarioDia && horarioDia.activo && horarioDia.entrada) {
-                const tsStr = `${iterDate.getFullYear()}-${String(iterDate.getMonth() + 1).padStart(2, '0')}-${String(iterDate.getDate()).padStart(2, '0')}`;
-                if (!checkinDates.has(tsStr) && !isVacation(iterDate)) {
-                    const todayMidnight = new Date();
-                    todayMidnight.setHours(0, 0, 0, 0);
-                    // Solo cuenta falta si el día ya concluyó
-                    if (iterDate < todayMidnight) {
-                        faltasTotales++;
-                        listaFaltas.push(tsStr);
-                    }
-                }
-            }
-            iterDate.setDate(iterDate.getDate() + 1);
-        }
 
         if (user.rol === 'socio') {
             retardosTotales = 0;
