@@ -1996,6 +1996,25 @@ app.post('/api/projects', async (req, res) => {
     }
 });
 
+app.delete('/api/projects/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const deletedProject = await ProjectModel.findByIdAndDelete(id);
+        if (!deletedProject) return res.status(404).json({ error: 'Proyecto no encontrado.' });
+
+        const plans = await PlanModel.find({ proyectoId: id });
+        for (const plan of plans) {
+            await PlanMarker.deleteMany({ planId: plan._id });
+            await plan.deleteOne();
+        }
+
+        io.emit('deleted_project', { id });
+        res.json({ message: 'Proyecto eliminado correctamente.' });
+    } catch (e) {
+        res.status(500).json({ error: 'Error eliminando proyecto.' });
+    }
+});
+
 app.get('/api/plans/project/:proyectoId', async (req, res) => {
     try {
         const { proyectoId } = req.params;
