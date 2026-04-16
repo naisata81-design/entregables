@@ -451,6 +451,13 @@ async function notifyAll(payload) {
     }
 }
 
+async function notifyAdmins(payload) {
+    const adminSubs = await PushSubscription.find({ role: 'admin' });
+    for (const sub of adminSubs) {
+        await sendPushNotification(sub.subscription, payload);
+    }
+}
+
 async function notifyUserByName(fullName, payload) {
     const users = await User.find({});
     const targetUser = users.find(u => `${u.nombre} ${u.apellido}`.trim().toLowerCase() === fullName.trim().toLowerCase());
@@ -1070,6 +1077,14 @@ app.post('/api/vehicles/:id/return', async (req, res) => {
             imgReporteDanos
         });
         await tx.save();
+        
+        if (userId !== 'EXTERNO') {
+            notifyUser(userId, {
+                title: "Vehículo Devuelto",
+                body: `Tu devolución del vehículo ${vehicle.marca} ha sido confirmada en almacén.`
+            });
+        }
+
         res.status(200).json({ message: 'Vehículo devuelto exitosamente.', transaction: tx });
     } catch (e) {
         res.status(500).json({ error: 'Error interno devolviendo.' });
@@ -1283,6 +1298,11 @@ app.post('/api/ticket/single/:id/sign', async (req, res) => {
         await ticket.save();
 
         io.emit('ticket_signed', { ticketId: ticket._id.toString() });
+
+        notifyAdmins({
+            title: "Entregable Firmado",
+            body: `El cliente ${nombreCliente} ha firmado el Entregable / Ticket con folio ${ticket.folio || ticketId}.`
+        });
 
         res.json({ message: 'Firma guardada correctamente' });
     } catch (e) {
@@ -2258,6 +2278,11 @@ app.post('/api/inventory/transaction', async (req, res) => {
             notifyUserByName(responsable, {
                 title: "Asignación de Inventario",
                 body: `Se te han asignado herramientas. Revisa tu almacén personal.`
+            });
+        } else {
+            notifyUserByName(responsable, {
+                title: "Devolución de Inventario",
+                body: `Se ha confirmado exitosamente la devolución de tus herramientas o insumos.`
             });
         }
 
