@@ -767,9 +767,67 @@ app.get('/api/users/:id/dashboard-stats', async (req, res) => {
 
         const diasVacacionesDisponiblesCalc = await calcularVacacionesDinamicamente(user);
 
+        // 4. Calcular eventos para el calendario nuevo (Faltas, Retardos, Vehiculos, Checkins)
+        const vehicleTx = await VehicleTransaction.find({
+            responsable: { $in: [fullName, user.nombre, user.nombre.trim()] }
+        }).sort({ fecha: 1 }).populate('vehicleId');
 
+        let eventosCalendario = {};
 
+        // Agregar checkins
+        for (const [dateStr, checks] of Object.entries(stats.checkinsPorDia || {})) {
+            if (!eventosCalendario[dateStr]) eventosCalendario[dateStr] = { falta: false, retardo: false, vehiculos: [], checkins: [] };
+            eventosCalendario[dateStr].checkins = checks.map(c => ({
+                tipo: c.tipo,
+                time: new Date(c.timestamp).toLocaleTimeString('en-US', { timeZone: 'America/Mexico_City', hour: '2-digit', minute:'2-digit' })
+            }));
+        }
 
+        // Agregar faltas
+        for (const fDate of stats.diasFalta || []) {
+            if (!eventosCalendario[fDate]) eventosCalendario[fDate] = { falta: false, retardo: false, vehiculos: [], checkins: [] };
+            eventosCalendario[fDate].falta = true;
+        }
+
+        // Agregar retardos
+        for (const rDate of stats.diasRetardo || []) {
+            if (!eventosCalendario[rDate]) eventosCalendario[rDate] = { falta: false, retardo: false, vehiculos: [], checkins: [] };
+            eventosCalendario[rDate].retardo = true;
+        }
+
+        // Agregar vehículos asignados
+        let currentSalida = null;
+        for (const tx of vehicleTx) {
+            if (tx.tipoMovimiento === 'Salida') {
+                currentSalida = tx;
+            } else if (tx.tipoMovimiento === 'Devolucion' && currentSalida) {
+                let d = new Date(currentSalida.fecha);
+                let end = new Date(tx.fecha);
+                while (d <= end) {
+                    const dStr = d.toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
+                    if (!eventosCalendario[dStr]) eventosCalendario[dStr] = { falta: false, retardo: false, vehiculos: [], checkins: [] };
+                    const vName = currentSalida.vehicleId ? `${currentSalida.vehicleId.marca} ${currentSalida.vehicleId.modelo || ''}`.trim() : 'Vehículo';
+                    if (!eventosCalendario[dStr].vehiculos.includes(vName)) {
+                        eventosCalendario[dStr].vehiculos.push(vName);
+                    }
+                    d.setDate(d.getDate() + 1);
+                }
+                currentSalida = null;
+            }
+        }
+        if (currentSalida) {
+            let d = new Date(currentSalida.fecha);
+            let end = new Date();
+            while (d <= end) {
+                const dStr = d.toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
+                if (!eventosCalendario[dStr]) eventosCalendario[dStr] = { falta: false, retardo: false, vehiculos: [], checkins: [] };
+                const vName = currentSalida.vehicleId ? `${currentSalida.vehicleId.marca} ${currentSalida.vehicleId.modelo || ''}`.trim() : 'Vehículo';
+                if (!eventosCalendario[dStr].vehiculos.includes(vName)) {
+                    eventosCalendario[dStr].vehiculos.push(vName);
+                }
+                d.setDate(d.getDate() + 1);
+            }
+        }
 
         res.json({
             diasVacacionesDisponibles: diasVacacionesDisponiblesCalc,
@@ -777,7 +835,8 @@ app.get('/api/users/:id/dashboard-stats', async (req, res) => {
             faltasTotales,
             listaFaltas,
             herramientasActuales,
-            weeklyHistory
+            weeklyHistory,
+            eventosCalendario
         });
 
     } catch (e) {
