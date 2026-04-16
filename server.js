@@ -448,6 +448,10 @@ async function persistNotification(userId, payload) {
             data: payload.data || {}
         });
         await notif.save();
+        // Emit in real-time
+        if (typeof io !== 'undefined') {
+            io.emit('new_in_app_notification', { userId: userId });
+        }
     } catch (e) {
         console.error('Error guardando notificación en BD:', e);
     }
@@ -2341,11 +2345,15 @@ app.post('/api/inventory/transaction', async (req, res) => {
             io.emit('update_inventory_item', formattedItem);
         }
 
-        const txParams = {
-            tipoMovimiento, responsable, firma, fecha: new Date(), items: txItemsArr
-        };
-        const tx = new InventoryTransaction(txParams);
-        await tx.save();
+        // 3. Save transactions for each item
+        for (const itemTx of txItemsArr) {
+            const txParams = {
+                tipoMovimiento, responsable, firma, fecha: new Date(),
+                itemId: itemTx.itemId, cantidad: itemTx.cantidad
+            };
+            const tx = new InventoryTransaction(txParams);
+            await tx.save();
+        }
         
         if (tipoMovimiento === 'Salida') {
             notifyUserByName(responsable, {
