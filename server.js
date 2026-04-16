@@ -99,6 +99,15 @@ const AvisoSchema = new mongoose.Schema({
 }, { timestamps: true });
 const Aviso = mongoose.model('Aviso', AvisoSchema);
 
+const NotificationSchema = new mongoose.Schema({
+    userId: { type: String, required: true }, // Puede ser el ID de usuario o los strings especiales 'all', 'admins'
+    titulo: { type: String, required: true },
+    mensaje: { type: String, required: true },
+    leido: { type: Boolean, default: false },
+    data: { type: mongoose.Schema.Types.Mixed, default: {} } // Para futura navegación de módulos
+}, { timestamps: true });
+const NotificationModel = mongoose.model('Notification', NotificationSchema);
+
 const PushSubscriptionSchema = new mongoose.Schema({
     userId: { type: String, required: true },
     role: { type: String, default: 'normal' },
@@ -430,7 +439,22 @@ async function sendPushNotification(subscription, payload) {
     }
 }
 
+async function persistNotification(userId, payload) {
+    try {
+        const notif = new NotificationModel({
+            userId: userId,
+            titulo: payload.title || 'Notificación',
+            mensaje: payload.body || '',
+            data: payload.data || {}
+        });
+        await notif.save();
+    } catch (e) {
+        console.error('Error guardando notificación en BD:', e);
+    }
+}
+
 async function notifyAdmins(payload) {
+    await persistNotification('admins', payload);
     const adminSubs = await PushSubscription.find({ role: 'admin' });
     for (const sub of adminSubs) {
         await sendPushNotification(sub.subscription, payload);
@@ -438,6 +462,7 @@ async function notifyAdmins(payload) {
 }
 
 async function notifyUser(userId, payload) {
+    await persistNotification(userId, payload);
     const userSubs = await PushSubscription.find({ userId });
     for (const sub of userSubs) {
         await sendPushNotification(sub.subscription, payload);
@@ -445,15 +470,9 @@ async function notifyUser(userId, payload) {
 }
 
 async function notifyAll(payload) {
+    await persistNotification('all', payload);
     const allSubs = await PushSubscription.find({});
     for (const sub of allSubs) {
-        await sendPushNotification(sub.subscription, payload);
-    }
-}
-
-async function notifyAdmins(payload) {
-    const adminSubs = await PushSubscription.find({ role: 'admin' });
-    for (const sub of adminSubs) {
         await sendPushNotification(sub.subscription, payload);
     }
 }
@@ -490,6 +509,55 @@ app.post('/api/notifications/subscribe', async (req, res) => {
     }
 });
 
+// Obtener Notificaciones In-App
+app.get('/api/notifications/:userId', async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const { role } = req.query; // Para obtener también las globales si es admin
+
+        let queryIds = [userId, 'all'];
+        if (role === 'admin') {
+            queryIds.push('admins');
+        }
+
+        const notifications = await NotificationModel.find({ userId: { $in: queryIds } })
+            .sort({ createdAt: -1 })
+            .limit(50); // Cargar las últimas 50
+        
+        res.json(notifications);
+    } catch (e) {
+        res.status(500).json({ error: 'Error obteniendo notificaciones.' });
+    }
+});
+
+// Marcar notificación como leída
+app.put('/api/notifications/:id/read', async (req, res) => {
+    try {
+        const { id } = req.params;
+        await NotificationModel.findByIdAndUpdate(id, { leido: true });
+        res.json({ message: 'Notificación leída.' });
+    } catch (e) {
+        res.status(500).json({ error: 'Error actualizando notificación.' });
+    }
+});
+
+// Marcar TODAS como leídas
+app.put('/api/notifications/read-all/:userId', async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const { role } = req.body;
+
+        let queryIds = [userId, 'all'];
+        if (role === 'admin') {
+            queryIds.push('admins');
+        }
+        await NotificationModel.updateMany({ userId: { $in: queryIds }, leido: false }, { leido: true });
+        res.json({ message: 'Todas leídas.' });
+    } catch (e) {
+        res.status(500).json({ error: 'Error actualizando notificaciones.' });
+    }
+});
+
 // 1. Registro (Register)
 app.post('/api/register', async (req, res) => {
     try {
@@ -523,6 +591,11 @@ app.post('/api/register', async (req, res) => {
             numeroEmpleado: nextNumber
         });
         await newUser.save();
+
+        notifyAdmins({
+            title: "Nueva Solicitud de Cuenta",
+            body: `${nombre} ${apellido} ha solicitado crear una cuenta. Requiere tu aprobación.`
+        });
 
         res.status(201).json({ message: 'Usuario registrado. Pendiente de aprobación.', user: newUser });
     } catch (e) {
