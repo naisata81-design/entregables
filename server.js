@@ -223,16 +223,45 @@ const InventoryItemSchema = new mongoose.Schema({
 }, { timestamps: true });
 const InventoryItem = mongoose.model('InventoryItem', InventoryItemSchema);
 
-const InventoryTransactionSchema = new mongoose.Schema({
-    itemId: { type: mongoose.Schema.Types.ObjectId, ref: 'InventoryItem', required: true },
-    tipoMovimiento: { type: String, enum: ['Salida', 'Devolucion', 'Entrada'], required: true },
-    cantidad: { type: Number, required: true },
+const VehicleTransactionSchema = new mongoose.Schema({
+    vehicleId: { type: mongoose.Schema.Types.ObjectId, ref: 'Vehicle', required: true },
+    tipoMovimiento: { type: String, enum: ['Salida', 'Devolucion'], required: true },
     responsable: { type: String, required: true },
-    firma: { type: String, required: false }, // Base64
-    estadoConfirmacion: { type: String, enum: ['Confirmado', 'Pendiente', 'Rechazado'], default: 'Confirmado' },
+    motivo: { type: String, required: true },
+    kilometraje: { type: Number, required: true },
+    firma: { type: String, required: true }, // Base64
     fecha: { type: Date, default: Date.now }
 }, { timestamps: true });
-const InventoryTransaction = mongoose.model('InventoryTransaction', InventoryTransactionSchema);
+const VehicleTransaction = mongoose.model('VehicleTransaction', VehicleTransactionSchema);
+
+const DamageReportSchema = new mongoose.Schema({
+    vehicleId: { type: mongoose.Schema.Types.ObjectId, ref: 'Vehicle', required: true },
+    reportadoPor: { type: String, required: true },
+    observaciones: { type: String, required: true },
+    coordenadasCarroceria: [{
+        x: Number,
+        y: Number,
+        tipo: String // e.g., 'raya', 'golpe', 'roto'
+    }],
+    fotosEvidencia: [String], // Array de Base64 o URLs
+    fecha: { type: Date, default: Date.now },
+    firma: { type: String, required: true }
+}, { timestamps: true });
+const DamageReport = mongoose.model('DamageReport', DamageReportSchema);
+
+const PersonalEquipmentSchema = new mongoose.Schema({
+    userId: { type: String, required: true },
+    userName: { type: String, required: true },
+    equipmentName: { type: String, required: true },
+    serialNumber: { type: String, default: '' },
+    notes: { type: String, default: '' },
+    estado: { type: String, enum: ['Pendiente', 'Aceptado', 'Rechazado'], default: 'Pendiente' },
+    isMissing: { type: Boolean, default: false },
+    missingReportedAt: { type: Date }
+}, { timestamps: true });
+const PersonalEquipment = mongoose.model('PersonalEquipment', PersonalEquipmentSchema);
+
+// --- Helpers de Notificación Web Push ---
 
 const VehicleSchema = new mongoose.Schema({
     marca: { type: String, required: true },
@@ -247,20 +276,16 @@ const VehicleSchema = new mongoose.Schema({
 }, { timestamps: true });
 const Vehicle = mongoose.model('Vehicle', VehicleSchema);
 
-const VehicleTransactionSchema = new mongoose.Schema({
-    vehicleId: { type: mongoose.Schema.Types.ObjectId, ref: 'Vehicle', required: true },
-    userId: { type: String, required: true },
-    userName: { type: String, required: true },
-    tipoMovimiento: { type: String, enum: ['Préstamo', 'Devolución'], required: true },
-    fecha: { type: Date, default: Date.now },
-    notas: { type: String, default: '' },
-    bitacoraRevisada: { type: [String], default: [] },
-    firmaUsuario: { type: String, required: false },
+const InventoryTransactionSchema = new mongoose.Schema({
+    itemId: { type: mongoose.Schema.Types.ObjectId, ref: 'InventoryItem', required: true },
+    tipoMovimiento: { type: String, enum: ['Salida', 'Devolucion', 'Entrada'], required: true },
+    cantidad: { type: Number, required: true },
+    responsable: { type: String, required: true },
+    firma: { type: String, required: false }, // Base64
     estadoConfirmacion: { type: String, enum: ['Confirmado', 'Pendiente', 'Rechazado'], default: 'Confirmado' },
-    imgReporteDanos: { type: String, default: '' } // Base64
+    fecha: { type: Date, default: Date.now }
 }, { timestamps: true });
-const VehicleTransaction = mongoose.model('VehicleTransaction', VehicleTransactionSchema);
-
+const InventoryTransaction = mongoose.model('InventoryTransaction', InventoryTransactionSchema);
 
 async function calcularVacacionesDinamicamente(user) {
     if (!user) return 0;
@@ -839,6 +864,143 @@ app.put('/api/users/:id/photo', async (req, res) => {
         res.json({ message: 'Foto de perfil actualizada', fotoPerfil: user.fotoPerfil });
     } catch (e) {
         res.status(500).json({ error: 'Error actualizando foto de perfil.' });
+    }
+});
+
+// --- REST API para App Móvil (Login simplificado) ---
+app.post('/api/mobile/login', async (req, res) => {
+    try {
+        const { identificador, password } = req.body;
+        if (!identificador || !password) return res.status(400).json({ error: 'Faltan credenciales.' });
+
+        const user = await User.findOne({
+            $or: [{ correo: identificador }, { telefono: identificador }, { numeroEmpleado: isNaN(identificador) ? null : Number(identificador) }]
+        });
+
+        if (!user || user.password !== password) {
+            return res.status(400).json({ error: 'Credenciales inválidas.' });
+        }
+
+        if (user.estadoCuenta !== 'activa') {
+            return res.status(403).json({ error: 'Cuenta pendiente de revisión por el administrador.' });
+        }
+
+        res.json(user);
+    } catch (e) {
+        res.status(500).json({ error: 'Error interno en login móvil.' });
+    }
+});
+
+// --- Equipo Personal Endpoints ---
+app.get('/api/personal-equipment', async (req, res) => {
+    try {
+        const query = {};
+        if (req.query.userId) query.userId = req.query.userId;
+        const eq = await PersonalEquipment.find(query).sort({ createdAt: -1 });
+        res.json(eq.map(e => ({ ...e.toObject(), id: e._id.toString() })));
+    } catch (err) {
+        res.status(500).json({ error: 'Error obteniendo equipo personal.' });
+    }
+});
+
+app.post('/api/personal-equipment', async (req, res) => {
+    try {
+        const { userId, userName, equipmentName, serialNumber, notes } = req.body;
+        if (!userId || !userName || !equipmentName) {
+            return res.status(400).json({ error: 'Faltan datos obligatorios.' });
+        }
+
+        const newEq = new PersonalEquipment({
+            userId, userName, equipmentName, serialNumber, notes, estado: 'Pendiente'
+        });
+        await newEq.save();
+
+        // Notificar al usuario
+        notifyUser(userId, {
+            title: "Nueva Asignación de Equipo",
+            body: `Se te ha asignado: ${equipmentName}. Por favor, entrá a la aplicación para firmar de confirmación o rechazarlo.`
+        });
+
+        const responseObj = { ...newEq.toObject(), id: newEq._id.toString() };
+        io.emit('new_personal_equipment', responseObj);
+        res.status(201).json(responseObj);
+    } catch (e) {
+        res.status(500).json({ error: 'Error asignando equipo personal.' });
+    }
+});
+
+app.put('/api/personal-equipment/:id/status', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { estado } = req.body; // 'Aceptado' or 'Rechazado'
+
+        if (!['Aceptado', 'Rechazado'].includes(estado)) {
+            return res.status(400).json({ error: 'Estado inválido.' });
+        }
+
+        const eq = await PersonalEquipment.findById(id);
+        if (!eq) return res.status(404).json({ error: 'Equipo no encontrado.' });
+
+        eq.estado = estado;
+        await eq.save();
+
+        if (estado === 'Rechazado') {
+            notifyAdmins({
+                title: "Equipo Rechazado",
+                body: `${eq.userName} ha rechazado la asignación de: ${eq.equipmentName}`
+            });
+        }
+
+        const responseObj = { ...eq.toObject(), id: eq._id.toString() };
+        io.emit('update_personal_equipment', responseObj);
+        res.json(responseObj);
+    } catch (e) {
+        res.status(500).json({ error: 'Error actualizando estado del equipo.' });
+    }
+});
+
+app.put('/api/personal-equipment/:id/missing', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { isMissing } = req.body;
+        
+        const eq = await PersonalEquipment.findById(id);
+        if (!eq) return res.status(404).json({ error: 'Equipo no encontrado.' });
+
+        eq.isMissing = isMissing;
+        if (isMissing && !eq.missingReportedAt) {
+            eq.missingReportedAt = new Date();
+        } else if (!isMissing) {
+            eq.missingReportedAt = null;
+        }
+
+        await eq.save();
+
+        if (isMissing) {
+            notifyUser(eq.userId, {
+                title: "Atención: Elemento Faltante",
+                body: `Se reportó como faltante tu equipo: ${eq.equipmentName} durante una revisión.`
+            });
+        }
+
+        const responseObj = { ...eq.toObject(), id: eq._id.toString() };
+        io.emit('update_personal_equipment', responseObj);
+        res.json(responseObj);
+    } catch (e) {
+        res.status(500).json({ error: 'Error marcando equipo como faltante.' });
+    }
+});
+
+app.delete('/api/personal-equipment/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const eq = await PersonalEquipment.findByIdAndDelete(id);
+        if(!eq) return res.status(404).json({ error: 'Equipo no encontrado' });
+
+        io.emit('delete_personal_equipment', id);
+        res.json({ message: 'Equipo eliminado/dado de baja exitosamente.' });
+    } catch (e) {
+        res.status(500).json({ error: 'Error al dar de baja el equipo.' });
     }
 });
 
