@@ -228,7 +228,8 @@ const InventoryTransactionSchema = new mongoose.Schema({
     tipoMovimiento: { type: String, enum: ['Salida', 'Devolucion', 'Entrada'], required: true },
     cantidad: { type: Number, required: true },
     responsable: { type: String, required: true },
-    firma: { type: String, required: true }, // Base64
+    firma: { type: String, required: false }, // Base64
+    estadoConfirmacion: { type: String, enum: ['Confirmado', 'Pendiente', 'Rechazado'], default: 'Confirmado' },
     fecha: { type: Date, default: Date.now }
 }, { timestamps: true });
 const InventoryTransaction = mongoose.model('InventoryTransaction', InventoryTransactionSchema);
@@ -238,7 +239,7 @@ const VehicleSchema = new mongoose.Schema({
     modelo: { type: String, required: true },
     color: { type: String, required: true },
     placas: { type: String, required: true, unique: true },
-    estado: { type: String, enum: ['Disponible', 'Prestado', 'Mantenimiento'], default: 'Disponible' },
+    estado: { type: String, enum: ['Disponible', 'Prestado', 'Mantenimiento', 'Pendiente de Confirmación'], default: 'Disponible' },
     bitacoraEsperada: { type: [String], default: ['Gato', 'Refacción', 'Cables auxiliares', 'Extintor'] },
     lastDamageReport: { type: String, default: '' },
     currentUserId: { type: String, default: null },
@@ -254,6 +255,8 @@ const VehicleTransactionSchema = new mongoose.Schema({
     fecha: { type: Date, default: Date.now },
     notas: { type: String, default: '' },
     bitacoraRevisada: { type: [String], default: [] },
+    firmaUsuario: { type: String, required: false },
+    estadoConfirmacion: { type: String, enum: ['Confirmado', 'Pendiente', 'Rechazado'], default: 'Confirmado' },
     imgReporteDanos: { type: String, default: '' } // Base64
 }, { timestamps: true });
 const VehicleTransaction = mongoose.model('VehicleTransaction', VehicleTransactionSchema);
@@ -1100,7 +1103,7 @@ app.post('/api/vehicles/:id/loan', async (req, res) => {
         if (!vehicle) return res.status(404).json({ error: 'Vehículo no encontrado.' });
         if (vehicle.estado !== 'Disponible') return res.status(400).json({ error: 'El vehículo no está disponible.' });
 
-        vehicle.estado = 'Prestado';
+        vehicle.estado = 'Pendiente de Confirmación';
         vehicle.currentUserId = userId;
         vehicle.currentUserName = userName;
         await vehicle.save();
@@ -1112,18 +1115,19 @@ app.post('/api/vehicles/:id/loan', async (req, res) => {
             tipoMovimiento: 'Préstamo',
             notas,
             bitacoraRevisada,
-            imgReporteDanos
+            imgReporteDanos,
+            estadoConfirmacion: 'Pendiente'
         });
         await tx.save();
         
         if (userId !== 'EXTERNO') {
-            notifyUser(userId, {
+            notifyUserByName(userName, {
                 title: "Vehículo Asignado",
-                body: `Se te ha asignado el vehículo de manera oficial. Por favor, revisa la bitácora.`
+                body: `Se te ha asignado un vehículo. Por favor, abre la app para firmar de conformidad.`
             });
         }
         
-        res.status(200).json({ message: 'Vehículo asignado exitosamente.', transaction: tx });
+        res.status(200).json({ message: 'Vehículo en proceso de asignación (Firma pendiente).', transaction: tx });
     } catch (e) {
         res.status(500).json({ error: 'Error interno asignando.' });
     }
@@ -2348,8 +2352,9 @@ app.post('/api/inventory/transaction', async (req, res) => {
         // 3. Save transactions for each item
         for (const itemTx of txItemsArr) {
             const txParams = {
-                tipoMovimiento, responsable, firma, fecha: new Date(),
-                itemId: itemTx.itemId, cantidad: itemTx.cantidad
+                tipoMovimiento, responsable, firma: firma || '', fecha: new Date(),
+                itemId: itemTx.itemId, cantidad: itemTx.cantidad,
+                estadoConfirmacion: tipoMovimiento === 'Salida' ? 'Pendiente' : 'Confirmado'
             };
             const tx = new InventoryTransaction(txParams);
             await tx.save();
@@ -2358,7 +2363,7 @@ app.post('/api/inventory/transaction', async (req, res) => {
         if (tipoMovimiento === 'Salida') {
             notifyUserByName(responsable, {
                 title: "Asignación de Inventario",
-                body: `Se te han asignado herramientas. Revisa tu almacén personal.`
+                body: `Se te han pre-asignado herramientas. Abre la app para firmar de conformidad.`
             });
         } else {
             notifyUserByName(responsable, {
@@ -2373,6 +2378,108 @@ app.post('/api/inventory/transaction', async (req, res) => {
     } catch (e) {
         console.error("error tx", e);
         res.status(500).json({ error: 'Error procesando la transacción multi-ítem.' });
+    }
+});
+
+// --- Assignments Confirmation Flow ---
+app.get('/api/assignments/pending/:userId', async (req, res) => {
+    try {
+        const user = await User.findById(req.params.userId);
+        if (!user) return res.status(404).json({error: 'No user'});
+        const fullName = `${user.nombre} ${user.apellido}`;
+        
+        const pendingInventory = await InventoryTransaction.find({ 
+            responsable: fullName, 
+            estadoConfirmacion: 'Pendiente' 
+        }).populate('itemId');
+        
+        const pendingVehicles = await VehicleTransaction.find({ 
+            userId: req.params.userId, 
+            estadoConfirmacion: 'Pendiente' 
+        }).populate('vehicleId');
+        
+        res.json({ inventory: pendingInventory, vehicles: pendingVehicles });
+    } catch (e) {
+        res.status(500).json({ error: 'Error fetching assignments' });
+    }
+});
+
+app.put('/api/assignments/:type/:id/confirm', async (req, res) => {
+    try {
+        const { firma } = req.body;
+        if (!firma) return res.status(400).json({ error: 'Firma requerida' });
+        
+        if (req.params.type === 'inventory') {
+            const tx = await InventoryTransaction.findById(req.params.id);
+            if (!tx) return res.status(404).json({error: 'Tx no encontrada'});
+            tx.estadoConfirmacion = 'Confirmado';
+            tx.firma = firma;
+            await tx.save();
+            io.emit('inventory_transactions_updated', { responsable: tx.responsable });
+            res.json({ success: true });
+        } else if (req.params.type === 'vehicle') {
+            const tx = await VehicleTransaction.findById(req.params.id);
+            if (!tx) return res.status(404).json({error: 'Tx no encontrada'});
+            tx.estadoConfirmacion = 'Confirmado';
+            tx.firmaUsuario = firma;
+            await tx.save();
+            
+            const v = await Vehicle.findById(tx.vehicleId);
+            if (v) {
+                v.estado = 'Prestado';
+                await v.save();
+                io.emit('vehicle_updated', v);
+            }
+            res.json({ success: true });
+        } else {
+            res.status(400).json({ error: 'Type invalid' });
+        }
+    } catch(e) {
+        res.status(500).json({ error: 'Error confirming assignment' });
+    }
+});
+
+app.put('/api/assignments/:type/:id/reject', async (req, res) => {
+    try {
+        if (req.params.type === 'inventory') {
+            const tx = await InventoryTransaction.findById(req.params.id);
+            if (!tx) return res.status(404).json({error: 'Tx no encontrada'});
+            
+            const item = await InventoryItem.findById(tx.itemId);
+            if (item && tx.tipoMovimiento === 'Salida') {
+                item.cantidadEnStock += tx.cantidad;
+                await item.save();
+                io.emit('update_inventory_item', { ...item.toObject(), id: item._id.toString() });
+            }
+            
+            tx.estadoConfirmacion = 'Rechazado';
+            await tx.save();
+            io.emit('inventory_transactions_updated', { responsable: tx.responsable });
+            
+            notifyAdmins({ title: "Asignación Rechazada", body: `${tx.responsable} rechazó la asignación de ${item ? item.nombre : 'un ítem'}.` });
+            res.json({ success: true });
+        } else if (req.params.type === 'vehicle') {
+            const tx = await VehicleTransaction.findById(req.params.id);
+            if (!tx) return res.status(404).json({error: 'Tx no encontrada'});
+            
+            tx.estadoConfirmacion = 'Rechazado';
+            await tx.save();
+            
+            const v = await Vehicle.findById(tx.vehicleId);
+            if (v) {
+                v.estado = 'Disponible';
+                v.currentUserId = null;
+                v.currentUserName = null;
+                await v.save();
+                io.emit('vehicle_updated', v);
+                notifyAdmins({ title: "Vehículo Rechazado", body: `${tx.userName} rechazó la asignación de ${v.marca} ${v.modelo}.` });
+            }
+            res.json({ success: true });
+        } else {
+            res.status(400).json({ error: 'Type invalid' });
+        }
+    } catch(e) {
+        res.status(500).json({ error: 'Error rejecting assignment' });
     }
 });
 
