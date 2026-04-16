@@ -1032,10 +1032,12 @@ app.post('/api/vehicles/:id/loan', async (req, res) => {
         });
         await tx.save();
         
-        notifyUser(userId, {
-            title: "Vehículo Asignado",
-            body: `Se te ha asignado el vehículo de manera oficial. Por favor, revisa la bitácora.`
-        });
+        if (userId !== 'EXTERNO') {
+            notifyUser(userId, {
+                title: "Vehículo Asignado",
+                body: `Se te ha asignado el vehículo de manera oficial. Por favor, revisa la bitácora.`
+            });
+        }
         
         res.status(200).json({ message: 'Vehículo asignado exitosamente.', transaction: tx });
     } catch (e) {
@@ -1076,7 +1078,13 @@ app.post('/api/vehicles/:id/return', async (req, res) => {
 
 app.get('/api/users/:id/vehicles', async (req, res) => {
     try {
-        const txs = await VehicleTransaction.find({ userId: req.params.id }).sort({ fecha: -1 }).populate('vehicleId');
+        const oneYearAgo = new Date();
+        oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+
+        const txs = await VehicleTransaction.find({ 
+            userId: req.params.id,
+            fecha: { $gte: oneYearAgo }
+        }).sort({ fecha: -1 }).populate('vehicleId');
 
         // Uso de la nueva propiedad global del vehículo para evitar bucles visuales:
         const currentVehicles = await Vehicle.find({ currentUserId: req.params.id });
@@ -1087,6 +1095,22 @@ app.get('/api/users/:id/vehicles', async (req, res) => {
         });
     } catch (e) {
         res.status(500).json({ error: 'Error obteniendo historial de vehículo.' });
+    }
+});
+
+app.get('/api/vehicles/:id/history', async (req, res) => {
+    try {
+        const oneYearAgo = new Date();
+        oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+        
+        const txs = await VehicleTransaction.find({ 
+            vehicleId: req.params.id,
+            fecha: { $gte: oneYearAgo }
+        }).sort({ fecha: -1 }).populate('vehicleId');
+
+        res.json({ history: txs });
+    } catch (e) {
+        res.status(500).json({ error: 'Error obteniendo historial del vehículo.' });
     }
 });
 
