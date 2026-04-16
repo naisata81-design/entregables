@@ -2246,6 +2246,22 @@ app.post('/api/inventory/transaction', async (req, res) => {
     }
 });
 
+app.get('/api/inventory/transactions/history', async (req, res) => {
+    try {
+        const sixMonthsAgo = new Date();
+        sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+
+        const transactions = await InventoryTransaction.find({ fecha: { $gte: sixMonthsAgo } })
+            .sort({ fecha: -1 })
+            .populate('itemId', 'nombre numeroParte tipo');
+            
+        res.json(transactions);
+    } catch (e) {
+        console.error("Error historial global:", e);
+        res.status(500).json({ error: 'Error obteniendo historial global de inventario.' });
+    }
+});
+
 app.get('/api/inventory/:id/transactions', async (req, res) => {
     try {
         const transactions = await InventoryTransaction.find({ itemId: req.params.id }).sort({ fecha: -1 });
