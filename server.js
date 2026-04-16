@@ -316,6 +316,107 @@ async function calcularVacacionesDinamicamente(user) {
     return Math.max(0, diasBase - consumidos);
 }
 
+// --- Helper Functions para Estadisticas y Asistencia ---
+async function calcularEstadisticasAsistenciaUsuario(user) {
+    const userId = user._id ? user._id.toString() : user.id;
+    const settings = await Settings.findOne({ tipo: 'timeclock' });
+    const globalHorarios = settings ? settings.horariosPorDia : [];
+    const globalTolerancia = settings ? Number(settings.toleranciaMinutos) || 15 : 15;
+
+    const checkins = await CheckIn.find({ userId }).sort({ timestamp: 1 });
+    const vacaciones = await VacationRequest.find({ userId, estado: 'aprobada' });
+
+    let faltasTotales = 0;
+    let retardosTotales = 0;
+    let diasFalta = [];
+    let diasRetardo = [];
+
+    const isVacation = (dateStr) => {
+        return vacaciones.some(v => {
+            const startStr = new Date(v.fechaInicio).toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
+            const endStr = new Date(v.fechaFin).toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
+            return dateStr >= startStr && dateStr <= endStr;
+        });
+    };
+
+    const checkinsPorDia = {};
+    checkins.forEach(c => {
+        const d = new Date(c.timestamp);
+        const dateStr = d.toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
+        if (!checkinsPorDia[dateStr]) checkinsPorDia[dateStr] = [];
+        checkinsPorDia[dateStr].push(c);
+    });
+
+    const checkinDatesStr = new Set(Object.keys(checkinsPorDia));
+    const hoy = new Date();
+    hoy.setHours(23, 59, 59, 999);
+
+    let startTrackingDate = user.fechaReinicioAsistencia ? new Date(user.fechaReinicioAsistencia) : (user.fechaIngreso ? new Date(user.fechaIngreso) : new Date(hoy.getFullYear(), 0, 1));
+    startTrackingDate.setHours(0, 0, 0, 0);
+
+    let iterDate = new Date(startTrackingDate);
+    while (iterDate <= hoy) {
+        iterDate.setHours(12, 0, 0, 0);
+        const tsStr = iterDate.toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
+        const dayOfWeek = new Date(iterDate.toLocaleString('en-US', { timeZone: 'America/Mexico_City' })).getDay();
+
+        let horarioDia = (user.usaHorarioPersonalizado && user.horariosPorDia)
+            ? user.horariosPorDia.find(h => h.dia === dayOfWeek)
+            : globalHorarios.find(h => h.dia === dayOfWeek);
+
+        if (horarioDia && horarioDia.activo && horarioDia.entrada && !isVacation(tsStr)) {
+            if (!checkinDatesStr.has(tsStr)) {
+                const todayMidnight = new Date();
+                todayMidnight.setHours(0, 0, 0, 0);
+                if (iterDate < todayMidnight) {
+                    faltasTotales++;
+                    diasFalta.push(tsStr);
+                }
+            } else {
+                const entradasDelDia = checkinsPorDia[tsStr].filter(c => c.tipo && c.tipo.trim() === 'Entrada');
+                if (entradasDelDia.length > 0) {
+                    const primeraEntrada = entradasDelDia[0];
+                    const d = new Date(primeraEntrada.timestamp);
+                    const [h, m] = horarioDia.entrada.split(':').map(Number);
+                    const expectedMinutes = h * 60 + m;
+
+                    const mxTime = d.toLocaleTimeString('en-US', { timeZone: 'America/Mexico_City', hour12: false });
+                    const [actualH, actualM] = mxTime.split(':').map(Number);
+                    const actualMinutes = actualH * 60 + actualM;
+
+                    if (actualMinutes > (expectedMinutes + globalTolerancia)) {
+                        retardosTotales++;
+                        diasRetardo.push(tsStr);
+                    }
+                } else {
+                    const todayMidnight = new Date();
+                    todayMidnight.setHours(0, 0, 0, 0);
+                    if (iterDate < todayMidnight) {
+                        faltasTotales++;
+                        diasFalta.push(tsStr);
+                    }
+                }
+            }
+        }
+        iterDate.setDate(iterDate.getDate() + 1);
+    }
+
+    if (user.rol === 'socio') {
+         faltasTotales = 0;
+         retardosTotales = 0;
+         diasFalta = [];
+         diasRetardo = [];
+    }
+
+    return {
+        faltasTotales,
+        retardosTotales,
+        diasFalta,
+        diasRetardo,
+        checkinsPorDia
+    };
+}
+
 // --- Helper Functions para Web Push ---
 async function sendPushNotification(subscription, payload) {
     try {
@@ -499,89 +600,16 @@ app.get('/api/users/:id', async (req, res) => {
 app.get('/api/users/:id/dashboard-stats', async (req, res) => {
     try {
         const userId = req.params.id;
-        const user = await User.findById(userId).select('nombre apellido diasVacacionesDisponibles horariosPorDia usaHorarioPersonalizado rol fechaIngreso');
+        const user = await User.findById(userId).select('nombre apellido diasVacacionesDisponibles horariosPorDia usaHorarioPersonalizado rol fechaIngreso fechaReinicioAsistencia');
         if (!user) return res.status(404).json({ error: 'Usuario no encontrado.' });
 
         const fullName = `${user.nombre} ${user.apellido}`;
 
-        // 1. Calcular Asistencias (Retardos y Faltas) históricos
-        const checkins = await CheckIn.find({ userId: userId }).sort({ timestamp: 1 });
-        let settings = await Settings.findOne({ tipo: 'timeclock' });
-        const globalTolerancia = settings ? Number(settings.toleranciaMinutos) || 15 : 15;
-        const globalHorarios = settings ? settings.horariosPorDia : [];
-
-        let retardosTotales = 0;
-        let faltasTotales = 0;
-        let listaFaltas = [];
-
-        const vacacionesAprobadas = await VacationRequest.find({ userId: userId, estado: 'aprobada' });
-        const isVacation = (dateStr) => {
-            return vacacionesAprobadas.some(v => {
-                const startStr = new Date(v.fechaInicio).toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
-                const endStr = new Date(v.fechaFin).toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
-                return dateStr >= startStr && dateStr <= endStr;
-            });
-        };
-
-        const checkinsPorDia = {};
-        checkins.forEach(c => {
-            const d = new Date(c.timestamp);
-            const dateStr = d.toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
-            if (!checkinsPorDia[dateStr]) checkinsPorDia[dateStr] = [];
-            checkinsPorDia[dateStr].push(c);
-        });
-
-        const checkinDatesStr = new Set(Object.keys(checkinsPorDia));
-        const hoyDateObj = new Date();
-
-        let startTrackingDate = user.fechaReinicioAsistencia ? new Date(user.fechaReinicioAsistencia) : (user.fechaIngreso ? new Date(user.fechaIngreso) : new Date(hoyDateObj.getFullYear(), 0, 1));
-        startTrackingDate.setHours(0, 0, 0, 0);
-
-        let iterDate = new Date(startTrackingDate);
-        while (iterDate <= hoyDateObj) {
-            iterDate.setHours(12, 0, 0, 0);
-            const tsStr = iterDate.toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
-            const dayOfWeek = new Date(iterDate.toLocaleString('en-US', { timeZone: 'America/Mexico_City' })).getDay();
-
-            let horarioDia = (user.usaHorarioPersonalizado && user.horariosPorDia)
-                ? user.horariosPorDia.find(h => h.dia === dayOfWeek)
-                : globalHorarios.find(h => h.dia === dayOfWeek);
-
-            if (horarioDia && horarioDia.activo && horarioDia.entrada && !isVacation(tsStr)) {
-                if (!checkinDatesStr.has(tsStr)) {
-                    const todayMidnight = new Date();
-                    todayMidnight.setHours(0, 0, 0, 0);
-                    if (iterDate < todayMidnight) {
-                        faltasTotales++;
-                        listaFaltas.push(tsStr);
-                    }
-                } else {
-                    const entradasDelDia = checkinsPorDia[tsStr].filter(c => c.tipo && c.tipo.trim() === 'Entrada');
-                    if (entradasDelDia.length > 0) {
-                        const primeraEntrada = entradasDelDia[0];
-                        const d = new Date(primeraEntrada.timestamp);
-                        const [h, m] = horarioDia.entrada.split(':').map(Number);
-                        const expectedMinutes = h * 60 + m;
-
-                        const mxTime = d.toLocaleTimeString('en-US', { timeZone: 'America/Mexico_City', hour12: false });
-                        const [actualH, actualM] = mxTime.split(':').map(Number);
-                        const actualMinutes = actualH * 60 + actualM;
-
-                        if (actualMinutes > (expectedMinutes + globalTolerancia)) {
-                            retardosTotales++;
-                        }
-                    } else {
-                        const todayMidnight = new Date();
-                        todayMidnight.setHours(0, 0, 0, 0);
-                        if (iterDate < todayMidnight) {
-                            faltasTotales++;
-                            listaFaltas.push(tsStr);
-                        }
-                    }
-                }
-            }
-            iterDate.setDate(iterDate.getDate() + 1);
-        }
+        // 1. Calcular Asistencias a través de Helper Compartido
+        const stats = await calcularEstadisticasAsistenciaUsuario(user);
+        let retardosTotales = stats.retardosTotales;
+        let faltasTotales = stats.faltasTotales;
+        let listaFaltas = stats.diasFalta;
 
         // 2. Calcular herramientas prestadas al empleado (Inventario Actual)
         const transactions = await InventoryTransaction.find({
@@ -629,11 +657,7 @@ app.get('/api/users/:id/dashboard-stats', async (req, res) => {
 
 
 
-        if (user.rol === 'socio') {
-            retardosTotales = 0;
-            faltasTotales = 0;
-            listaFaltas = [];
-        }
+
 
         res.json({
             diasVacacionesDisponibles: diasVacacionesDisponiblesCalc,
@@ -1501,115 +1525,20 @@ app.get('/api/checkins/today/:userId', async (req, res) => {
 // 6.1 Reportes y Estadísticas para Administradores
 app.get('/api/admin/clock-stats', async (req, res) => {
     try {
-        const users = await User.find({}).select('nombre apellido _id fechaIngreso fechaReinicioAsistencia horariosPorDia usaHorarioPersonalizado');
-        const settings = await Settings.findOne({ tipo: 'timeclock' });
-        const globalHorarios = settings ? settings.horariosPorDia : [];
-        const globalTolerancia = settings ? Number(settings.toleranciaMinutos) || 15 : 15;
-
+        const users = await User.find({}).select('nombre apellido _id fechaIngreso fechaReinicioAsistencia horariosPorDia usaHorarioPersonalizado rol');
         let report = [];
 
         for (const user of users) {
-            const userId = user._id.toString();
-            const checkins = await CheckIn.find({ userId }).sort({ timestamp: 1 });
-            const vacaciones = await VacationRequest.find({ userId: userId, estado: 'aprobada' });
-
-            const isVacation = (dateStr) => {
-                return vacaciones.some(v => {
-                    const startStr = new Date(v.fechaInicio).toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
-                    const endStr = new Date(v.fechaFin).toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
-                    return dateStr >= startStr && dateStr <= endStr;
-                });
-            };
-
-            let faltasTotales = 0;
-            let retardosTotales = 0;
-            let diasFalta = [];
-            let diasRetardo = [];
-
-            // Agrupar checkins por día
-            const checkinsPorDia = {};
-            checkins.forEach(c => {
-                const d = new Date(c.timestamp);
-                // Usar fecha local de CDMX para agrupar correctamente
-                const dateStr = d.toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
-                if (!checkinsPorDia[dateStr]) checkinsPorDia[dateStr] = [];
-                checkinsPorDia[dateStr].push(c);
-            });
-
-            const checkinDatesStr = new Set(Object.keys(checkinsPorDia));
-
-            const hoy = new Date();
-            hoy.setHours(23, 59, 59, 999);
-
-            // Corregido: Si existe fechaReinicioAsistencia se usa como punto de partida superior. Luego fechaIngreso, si no inicio del año.
-            let startTrackingDate = user.fechaReinicioAsistencia ? new Date(user.fechaReinicioAsistencia) : (user.fechaIngreso ? new Date(user.fechaIngreso) : new Date(hoy.getFullYear(), 0, 1));
-            startTrackingDate.setHours(0, 0, 0, 0);
-
-            let iterDate = new Date(startTrackingDate);
-            while (iterDate <= hoy) {
-                // Normalizar iterDate al mediodía para evitar saltos de día por zona horaria
-                iterDate.setHours(12, 0, 0, 0);
-                const tsStr = iterDate.toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
-
-                // Calcular el día de la semana basado en la fecha local de CDMX
-                const dayOfWeek = new Date(iterDate.toLocaleString('en-US', { timeZone: 'America/Mexico_City' })).getDay();
-
-                let horarioDia = (user.usaHorarioPersonalizado && user.horariosPorDia)
-                    ? user.horariosPorDia.find(h => h.dia === dayOfWeek)
-                    : globalHorarios.find(h => h.dia === dayOfWeek);
-
-                if (horarioDia && horarioDia.activo && horarioDia.entrada && !isVacation(tsStr)) {
-
-                    if (!checkinDatesStr.has(tsStr)) {
-                        const todayMidnight = new Date();
-                        todayMidnight.setHours(0, 0, 0, 0);
-                        // Solo contabiliza falta si el día ya terminó (iterDate es anterior a hoy)
-                        if (iterDate < todayMidnight) {
-                            faltasTotales++;
-                            diasFalta.push(tsStr);
-                        }
-                    } else {
-                        // Buscar la primera entrada de ese dia
-                        const entradasDelDia = checkinsPorDia[tsStr].filter(c => c.tipo && c.tipo.trim() === 'Entrada');
-                        if (entradasDelDia.length > 0) {
-                            const primeraEntrada = entradasDelDia[0];
-                            const d = new Date(primeraEntrada.timestamp);
-                            const [h, m] = horarioDia.entrada.split(':').map(Number);
-                            const expectedMinutes = h * 60 + m;
-
-                            const mxTime = d.toLocaleTimeString('en-US', { timeZone: 'America/Mexico_City', hour12: false });
-                            const [actualH, actualM] = mxTime.split(':').map(Number);
-                            const actualMinutes = actualH * 60 + actualM;
-
-                            if (actualMinutes > (expectedMinutes + globalTolerancia)) {
-                                console.log(`[ClockStats] RETARDO DETECTADO para ${user.nombre} el ${tsStr}`);
-                                retardosTotales++;
-                                diasRetardo.push(tsStr);
-                            }
-                        } else {
-                            // [NUEVO] Caso Escape: Tiene registros (ej. Salidas) pero nunca marcó Entrada
-                            const todayMidnight = new Date();
-                            todayMidnight.setHours(0, 0, 0, 0);
-                            // Solo contabilizamos falta por "Falta de entrada" si el día ya no es modificable/en curso
-                            if (iterDate < todayMidnight) {
-                                console.log(`[ClockStats] FALTA (Fuga de Entrada) para ${user.nombre} el ${tsStr}`);
-                                faltasTotales++;
-                                diasFalta.push(tsStr);
-                            }
-                        }
-                    }
-                }
-                iterDate.setDate(iterDate.getDate() + 1);
-            }
+            const stats = await calcularEstadisticasAsistenciaUsuario(user);
 
             report.push({
                 userId: user._id.toString(),
                 empleado: `${user.nombre} ${user.apellido}`,
-                faltasTotales,
-                retardosTotales,
-                diasFalta,
-                diasRetardo,
-                historial: checkinsPorDia
+                faltasTotales: stats.faltasTotales,
+                retardosTotales: stats.retardosTotales,
+                diasFalta: stats.diasFalta,
+                diasRetardo: stats.diasRetardo,
+                historial: stats.checkinsPorDia
             });
         }
         res.json(report);
