@@ -726,7 +726,7 @@ app.post('/api/notifications/subscribe', async (req, res) => {
         await PushSubscription.findOneAndUpdate(
             { 'subscription.endpoint': subscription.endpoint }, // Si el endpoint existe, actualízalo
             { userId, role, subscription },
-            { upsert: true, new: true }
+            { upsert: true, returnDocument: 'after' }
         );
         res.status(201).json({ message: 'Suscrito con éxito' });
     } catch (e) {
@@ -1537,7 +1537,7 @@ app.post('/api/vehicles', async (req, res) => {
 
 app.put('/api/vehicles/:id', async (req, res) => {
     try {
-        const v = await Vehicle.findByIdAndUpdate(req.params.id, req.body, { new: true });
+        const v = await Vehicle.findByIdAndUpdate(req.params.id, req.body, { returnDocument: 'after' });
         if (!v) return res.status(404).json({ error: 'No encontrado' });
         res.json(v);
     } catch (e) {
@@ -3117,7 +3117,7 @@ app.get('/api/helprequests/:userId', async (req, res) => {
 
 app.put('/api/helprequests/:id', async (req, res) => {
     try {
-        const updated = await HelpRequest.findByIdAndUpdate(req.params.id, { status: req.body.status }, { new: true });
+        const updated = await HelpRequest.findByIdAndUpdate(req.params.id, { status: req.body.status }, { returnDocument: 'after' });
         if (!updated) return res.status(404).json({ error: 'No encontrado' });
         
         io.emit('update_help_request', updated);
