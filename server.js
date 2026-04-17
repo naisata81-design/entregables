@@ -365,6 +365,50 @@ async function calcularVacacionesDinamicamente(user) {
 }
 
 // --- Helper Functions para Estadisticas y Asistencia ---
+// --- Global Helper para Feriados ---
+const isHoliday = (dateStr) => {
+    const [y, m, d] = dateStr.split('-');
+    const year = parseInt(y);
+        
+    if (!isHoliday.cache) isHoliday.cache = {};
+    if (!isHoliday.cache[year]) {
+        const holidays = [];
+        holidays.push(`${year}-01-01`); // Año Nuevo
+            
+        const getFirstMonday = (yr, mo) => {
+            let dt = new Date(yr, mo, 1);
+                while(dt.getDay() !== 1) { dt.setDate(dt.getDate() + 1); }
+            return dt;
+        };
+        const getNthMonday = (yr, mo, n) => {
+            let dt = getFirstMonday(yr, mo);
+                dt.setDate(dt.getDate() + (n - 1) * 7);
+            return dt;
+        };
+            
+        const febHoliday = getNthMonday(year, 1, 1);
+        holidays.push(`${year}-02-${String(febHoliday.getDate()).padStart(2, '0')}`); // Día Constitución
+            
+        const marHoliday = getNthMonday(year, 2, 3);
+        holidays.push(`${year}-03-${String(marHoliday.getDate()).padStart(2, '0')}`); // Natalicio Benito Juárez
+            
+        holidays.push(`${year}-05-01`); // Día del Trabajo
+        holidays.push(`${year}-09-16`); // Independencia
+            
+        if ((year - 2024) % 6 === 0) {
+            holidays.push(`${year}-10-01`); // Transmisión poder
+            }
+            
+        const novHoliday = getNthMonday(year, 10, 3);
+        holidays.push(`${year}-11-${String(novHoliday.getDate()).padStart(2, '0')}`); // Revolución
+            
+        holidays.push(`${year}-12-25`); // Navidad
+            
+            isHoliday.cache[year] = holidays;
+        }
+    return isHoliday.cache[year].includes(dateStr);
+    };
+
 async function calcularEstadisticasAsistenciaUsuario(user) {
     const userId = user._id ? user._id.toString() : user.id;
     const settings = await Settings.findOne({ tipo: 'timeclock' });
@@ -386,6 +430,8 @@ async function calcularEstadisticasAsistenciaUsuario(user) {
             return dateStr >= startStr && dateStr <= endStr;
         });
     };
+
+
 
     const checkinsPorDia = {};
     checkins.forEach(c => {
@@ -415,7 +461,7 @@ async function calcularEstadisticasAsistenciaUsuario(user) {
                       ? user.horariosPorDia.find(h => h.dia === dayOfWeek)
                       : globalHorarios.find(h => h.dia === dayOfWeek);
 
-        if (horarioDia && horarioDia.activo && horarioDia.entrada && !isVacation(tsStr)) {
+        if (horarioDia && horarioDia.activo && horarioDia.entrada && !isVacation(tsStr) && !isHoliday(tsStr)) {
             if (!checkinDatesStr.has(tsStr)) {
                 const todayMidnight = new Date();
                 todayMidnight.setHours(0, 0, 0, 0);
@@ -830,6 +876,48 @@ app.get('/api/users/:id/dashboard-stats', async (req, res) => {
                 iter.setDate(iter.getDate() + 1);
             }
         };
+
+        // Agregar feriados al calendario
+        const currentYear = new Date().getFullYear();
+        const yearsToCheck = [currentYear - 1, currentYear, currentYear + 1];
+        yearsToCheck.forEach(year => {
+            const holidays = [];
+            holidays.push(`${year}-01-01`);
+            
+            const getFirstMonday = (yr, mo) => {
+                let dt = new Date(yr, mo, 1);
+                while(dt.getDay() !== 1) { dt.setDate(dt.getDate() + 1); }
+                return dt;
+            };
+            const getNthMonday = (yr, mo, n) => {
+                let dt = getFirstMonday(yr, mo);
+                dt.setDate(dt.getDate() + (n - 1) * 7);
+                return dt;
+            };
+            
+            const febHoliday = getNthMonday(year, 1, 1);
+            holidays.push(`${year}-02-${String(febHoliday.getDate()).padStart(2, '0')}`);
+            
+            const marHoliday = getNthMonday(year, 2, 3);
+            holidays.push(`${year}-03-${String(marHoliday.getDate()).padStart(2, '0')}`);
+            
+            holidays.push(`${year}-05-01`);
+            holidays.push(`${year}-09-16`);
+            
+            if ((year - 2024) % 6 === 0) {
+                holidays.push(`${year}-10-01`);
+            }
+            
+            const novHoliday = getNthMonday(year, 10, 3);
+            holidays.push(`${year}-11-${String(novHoliday.getDate()).padStart(2, '0')}`);
+            
+            holidays.push(`${year}-12-25`);
+
+            for (const hDate of holidays) {
+                if (!eventosCalendario[hDate]) eventosCalendario[hDate] = { falta: false, retardo: false, vehiculos: [], checkins: [] };
+                eventosCalendario[hDate].feriado = true;
+            }
+        });
 
         // Agregar vehículos asignados
         let currentSalida = null;
@@ -2928,3 +3016,56 @@ io.on('connection', (socket) => {
         console.log('Cliente desconectado:', socket.id);
     });
 });
+// --- Cron Job para Notificaciones de Feriados ---
+const sentHolidayNotifications = {};
+
+setInterval(() => {
+    try {
+        const now = new Date();
+        const mxTimeStr = now.toLocaleString('en-US', { timeZone: 'America/Mexico_City', hour12: false, hour: '2-digit', minute: '2-digit' });
+        
+        // Ejecutar a las 08:00 AM CDMX
+        if (mxTimeStr === '08:00') {
+            const today = new Date(now.toLocaleString('en-US', { timeZone: 'America/Mexico_City' }));
+            
+            const getStr = (d) => {
+                const y = d.getFullYear();
+                const m = String(d.getMonth() + 1).padStart(2, '0');
+                const dd = String(d.getDate()).padStart(2, '0');
+                return `${y}-${m}-${dd}`;
+            };
+            
+            const todayStr = getStr(today);
+            
+            const inTwoDays = new Date(today);
+            inTwoDays.setDate(inTwoDays.getDate() + 2);
+            const inTwoDaysStr = getStr(inTwoDays);
+            
+            if (isHoliday(todayStr)) {
+                const flagKey = `holiday_today_${todayStr}`;
+                if (!sentHolidayNotifications[flagKey]) {
+                    sentHolidayNotifications[flagKey] = true;
+                    notifyAll({
+                        title: "¡Día Feriado!",
+                        body: "Hoy es día de descanso obligatorio por ley. ¡Que disfrutes tu día!"
+                    });
+                    console.log(`[Cron] Notificación de feriado enviada para hoy: ${todayStr}`);
+                }
+            }
+            
+            if (isHoliday(inTwoDaysStr)) {
+                const flagKey = `holiday_advance_${inTwoDaysStr}`;
+                if (!sentHolidayNotifications[flagKey]) {
+                    sentHolidayNotifications[flagKey] = true;
+                    notifyAll({
+                        title: "Próximo Descanso",
+                        body: `Recuerda que en 2 días (${inTwoDaysStr}) es día de descanso obligatorio por ley.`
+                    });
+                    console.log(`[Cron] Notificación preventiva enviada para el feriado: ${inTwoDaysStr}`);
+                }
+            }
+        }
+    } catch (e) {
+        console.error('[Cron] Error verificando feriados:', e);
+    }
+}, 60000); // Revisar cada minuto
