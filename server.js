@@ -276,11 +276,15 @@ const InventoryItem = mongoose.model('InventoryItem', InventoryItemSchema);
 
 const VehicleTransactionSchema = new mongoose.Schema({
     vehicleId: { type: mongoose.Schema.Types.ObjectId, ref: 'Vehicle', required: true },
-    tipoMovimiento: { type: String, enum: ['Salida', 'Devolucion'], required: true },
+    userId: { type: String, required: false },
+    userName: { type: String, required: false },
+    tipoMovimiento: { type: String, enum: ['Salida', 'Devolucion', 'Préstamo'], required: true },
     responsable: { type: String, required: true },
     motivo: { type: String, required: true },
     kilometraje: { type: Number, required: true },
     firma: { type: String, required: true }, // Base64
+    firmaUsuario: { type: String, required: false }, // Base64
+    estadoConfirmacion: { type: String, enum: ['Confirmado', 'Pendiente', 'Rechazado'], default: 'Confirmado' },
     fecha: { type: Date, default: Date.now }
 }, { timestamps: true });
 const VehicleTransaction = mongoose.model('VehicleTransaction', VehicleTransactionSchema);
@@ -3147,6 +3151,7 @@ io.on('connection', (socket) => {
         delete activeSocketsMap[socket.id];
         io.emit('it:users_count', Object.keys(activeSocketsMap).length);
         io.emit('it:users_count', io.engine.clientsCount);
+    });
 
     socket.on('auth', (correo) => {
         activeSocketsMap[socket.id] = correo;
@@ -3158,7 +3163,6 @@ io.on('connection', (socket) => {
         io.emit('admin:purge_cache');
     });
 
-    });
 });
 // --- Cron Job para Notificaciones de Feriados ---
 const sentHolidayNotifications = {};
