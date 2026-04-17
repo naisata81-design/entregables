@@ -12,6 +12,34 @@ const VAPID_PUBLIC_KEY = 'BJvKenaUsLTNY_QxgZy1Md3kIiRVNCS05ql5F5mrdgPYZY5A9xyYee
 const VAPID_PRIVATE_KEY = 'qMSDE_bohcrQBpKhYRXJ_Zb80eRuSOnx4dK9PmxUsEQ';
 webpush.setVapidDetails('mailto:soporte@naisata.com', VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
 
+
+// --- IT Console Log Interceptor ---
+const MAX_LOG_LINES = 100;
+const serverLogs = [];
+
+function addLogLine(level, ...args) {
+    const timestamp = new Date().toLocaleString('en-US', { timeZone: 'America/Mexico_City' });
+    const message = args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
+    serverLogs.push(`[${timestamp}] [${level}] ${message}`);
+    if (serverLogs.length > MAX_LOG_LINES) {
+        serverLogs.shift();
+    }
+}
+
+const originalLog = console.log;
+const originalError = console.error;
+
+console.log = function(...args) {
+    addLogLine('INFO', ...args);
+    originalLog.apply(console, args);
+};
+
+console.error = function(...args) {
+    addLogLine('ERROR', ...args);
+    originalError.apply(console, args);
+};
+// ----------------------------------
+
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } });
@@ -3014,6 +3042,7 @@ io.on('connection', (socket) => {
 
     socket.on('disconnect', () => {
         console.log('Cliente desconectado:', socket.id);
+        io.emit('it:users_count', io.engine.clientsCount);
     });
 });
 // --- Cron Job para Notificaciones de Feriados ---
@@ -3069,3 +3098,31 @@ setInterval(() => {
         console.error('[Cron] Error verificando feriados:', e);
     }
 }, 60000); // Revisar cada minuto
+// --- IT Super Admin APIs ---
+app.get('/api/it/logs', (req, res) => {
+    res.json(serverLogs);
+});
+
+app.post('/api/it/broadcast', async (req, res) => {
+    try {
+        const { title, body } = req.body;
+        if (!title || !body) return res.status(400).json({ error: 'Faltan campos' });
+        await notifyAll({ title, body });
+        res.json({ message: 'Notificación global enviada.' });
+    } catch (err) {
+        console.error('Error en broadcast:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/api/it/simulate-cron', (req, res) => {
+    try {
+        runCronRoutine();
+        res.json({ message: 'Rutina simulada con éxito.' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+// ---------------------------
+
+
