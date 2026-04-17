@@ -3113,6 +3113,21 @@ app.post('/api/face-checkin', async (req, res) => {
 
         const faceSvg = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="250" height="250" style="background:%230f172a;"><circle cx="125" cy="100" r="45" fill="none" stroke="%238b5cf6" stroke-width="8"/><path d="M 100 90 Q 110 80 120 90" fill="none" stroke="%238b5cf6" stroke-width="6" stroke-linecap="round"/><path d="M 130 90 Q 140 80 150 90" fill="none" stroke="%238b5cf6" stroke-width="6" stroke-linecap="round"/><path d="M 110 115 Q 125 125 140 115" fill="none" stroke="%238b5cf6" stroke-width="6" stroke-linecap="round"/><text x="50%" y="78%" dominant-baseline="middle" text-anchor="middle" fill="white" font-family="Arial, sans-serif" font-weight="bold" font-size="24">Face-ID</text><text x="50%" y="90%" dominant-baseline="middle" text-anchor="middle" fill="%2394a3b8" font-family="Arial, sans-serif" font-size="16">Reconocimiento Facial</text></svg>';
 
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const tomorrow = new Date(today);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+
+        const existingCheckIn = await CheckIn.findOne({
+            userId: user._id.toString(),
+            tipo: tipo,
+            timestamp: { $gte: today, $lt: tomorrow }
+        });
+
+        if (existingCheckIn) {
+            return res.status(400).json({ error: `Ya has registrado tu ${tipo.toLowerCase()} de hoy.` });
+        }
+
         const newCheckIn = new CheckIn({
             userId: user._id.toString(),
             userName: `${user.nombre} ${user.apellido}`,
