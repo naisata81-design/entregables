@@ -84,6 +84,29 @@ const UserSchema = new mongoose.Schema({
 }, { timestamps: true });
 const User = mongoose.model('User', UserSchema);
 
+const AdminAuditLogSchema = new mongoose.Schema({
+    adminCorreo: String,
+    action: String,
+    details: String,
+    timestamp: { type: Date, default: Date.now }
+});
+const AdminAuditLog = mongoose.model('AdminAuditLog', AdminAuditLogSchema);
+
+const BugReportSchema = new mongoose.Schema({
+    userCorreo: String,
+    description: String,
+    status: { type: String, default: 'pendiente' },
+    timestamp: { type: Date, default: Date.now }
+});
+const BugReport = mongoose.model('BugReport', BugReportSchema);
+
+async function logAdminAction(adminCorreo, action, details) {
+    try {
+        await AdminAuditLog.create({ adminCorreo, action, details });
+    } catch(e) { console.error("Error logging admin action:", e); }
+}
+
+
 // Run migration to assure numeroEmpleado
 async function asegurarNumeroEmpleado() {
     try {
@@ -3042,7 +3065,20 @@ io.on('connection', (socket) => {
 
     socket.on('disconnect', () => {
         console.log('Cliente desconectado:', socket.id);
+        delete activeSocketsMap[socket.id];
+        io.emit('it:users_count', Object.keys(activeSocketsMap).length);
         io.emit('it:users_count', io.engine.clientsCount);
+
+    socket.on('auth', (correo) => {
+        activeSocketsMap[socket.id] = correo;
+        io.emit('it:users_count', Object.keys(activeSocketsMap).length);
+    });
+
+    socket.on('admin:purge_cache', () => {
+        logAdminAction('daniel@naisata.com', 'PURGE_CACHE', 'Purgó caché de todos los clientes');
+        io.emit('admin:purge_cache');
+    });
+
     });
 });
 // --- Cron Job para Notificaciones de Feriados ---
