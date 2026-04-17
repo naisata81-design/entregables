@@ -809,9 +809,9 @@ app.get('/api/users/:id/dashboard-stats', async (req, res) => {
         // Agregar vehículos asignados
         let currentSalida = null;
         for (const tx of vehicleTx) {
-            if (tx.tipoMovimiento === 'Salida') {
+            if (tx.tipoMovimiento === 'Préstamo') {
                 currentSalida = tx;
-            } else if (tx.tipoMovimiento === 'Devolucion' && currentSalida) {
+            } else if (tx.tipoMovimiento === 'Devolución' && currentSalida) {
                 let d = new Date(currentSalida.fecha);
                 let end = new Date(tx.fecha);
                 while (d <= end) {
