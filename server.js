@@ -634,6 +634,81 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads'))); // Exponer la carpeta de subidas en la raíz
 
+// --- Advanced IT Suite ---
+let globalMaintenanceMode = false;
+const activeSocketsMap = {};
+
+app.use((req, res, next) => {
+    if (globalMaintenanceMode) {
+        if (!req.path.startsWith('/api/login') && !req.path.startsWith('/api/it/')) {
+            return res.status(503).json({ error: 'MAINTENANCE_MODE', message: 'Sistema en mantenimiento crítico' });
+        }
+    }
+    next();
+});
+
+app.post('/api/it/maintenance', (req, res) => {
+    globalMaintenanceMode = req.body.active;
+    io.emit('maintenance_active', globalMaintenanceMode);
+    logAdminAction('daniel@naisata.com', 'TOGGLE_MAINTENANCE', `Mantenimiento: ${globalMaintenanceMode}`);
+    res.json({ maintenance: globalMaintenanceMode });
+});
+
+app.get('/api/it/backup', async (req, res) => {
+    try {
+        const users = await User.find({});
+        const checkins = await mongoose.model('CheckIn').find({});
+        const vacations = await mongoose.model('VacationRequest').find({});
+        const vehicles = await mongoose.model('VehicleTransaction').find({});
+        const helps = await mongoose.model('HelpRequest').find({});
+        
+        const backupData = {
+            timestamp: new Date(),
+            users, checkins, vacations, vehicles, helps
+        };
+        logAdminAction('daniel@naisata.com', 'DOWNLOAD_BACKUP', 'Se generó un respaldo JSON global');
+        res.json(backupData);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/it/active-users', (req, res) => {
+    res.json(activeSocketsMap);
+});
+
+app.post('/api/it/disconnect-user', (req, res) => {
+    const { socketId } = req.body;
+    const socket = io.sockets.sockets.get(socketId);
+    if (socket) {
+        socket.emit('force_logout', 'Desconectado remotamente por el administrador');
+        socket.disconnect(true);
+        logAdminAction('daniel@naisata.com', 'KICK_USER', `Expulsó al socket ${socketId}`);
+        res.json({ message: 'Usuario desconectado exitosamente' });
+    } else {
+        res.status(404).json({ error: 'Socket no encontrado o ya desconectado' });
+    }
+});
+
+app.get('/api/it/audit-logs', async (req, res) => {
+    const logs = await mongoose.model('AdminAuditLog').find({}).sort({ timestamp: -1 }).limit(200);
+    res.json(logs);
+});
+
+app.get('/api/it/bug-reports', async (req, res) => {
+    const bugs = await mongoose.model('BugReport').find({}).sort({ timestamp: -1 });
+    res.json(bugs);
+});
+
+app.post('/api/bug-report', async (req, res) => {
+    try {
+        const { correo, description } = req.body;
+        const bug = new (mongoose.model('BugReport'))({ userCorreo: correo, description });
+        await bug.save();
+        res.json({ message: 'Reporte de bug enviado correctamente' });
+    } catch(e) { res.status(500).json({ error: e.message }); }
+});
+// -------------------------
+
+
 // --- Endpoints Notificaciones Web Push ---
 app.post('/api/notifications/subscribe', async (req, res) => {
     try {
