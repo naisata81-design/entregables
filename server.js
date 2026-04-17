@@ -287,6 +287,17 @@ const InventoryTransactionSchema = new mongoose.Schema({
 }, { timestamps: true });
 const InventoryTransaction = mongoose.model('InventoryTransaction', InventoryTransactionSchema);
 
+const HelpRequestSchema = new mongoose.Schema({
+    requesterId: { type: String, required: true },
+    requesterName: { type: String, required: true },
+    assignedToId: { type: String, required: true },
+    assignedToName: { type: String, required: true },
+    description: { type: String, required: true },
+    targetDate: { type: String, required: true },
+    status: { type: String, enum: ['pendiente', 'confirmado', 'resuelto'], default: 'pendiente' }
+}, { timestamps: true });
+const HelpRequest = mongoose.model('HelpRequest', HelpRequestSchema);
+
 async function calcularVacacionesDinamicamente(user) {
     if (!user) return 0;
 
@@ -769,7 +780,7 @@ app.get('/api/users/:id/dashboard-stats', async (req, res) => {
 
         // 4. Calcular eventos para el calendario nuevo (Faltas, Retardos, Vehiculos, Checkins)
         const vehicleTx = await VehicleTransaction.find({
-            responsable: { $in: [fullName, user.nombre, user.nombre.trim()] }
+            responsable: { $in: [fullName, user.nombre, user.nombre ? user.nombre.trim() : ''] }
         }).sort({ fecha: 1 }).populate('vehicleId');
 
         let eventosCalendario = {};
@@ -2831,6 +2842,73 @@ app.post('/api/zk-checkin', async (req, res) => {
     } catch (e) {
         console.error('Error procesando ZK CheckIn:', e);
         res.status(500).json({ error: 'Error del servidor procesando ZK CheckIn' });
+    }
+});
+
+// --- Help Requests API ---
+app.post('/api/helprequests', async (req, res) => {
+    try {
+        const { requesterId, requesterName, assignedToId, assignedToName, description, targetDate } = req.body;
+        const newReq = new HelpRequest({
+            requesterId,
+            requesterName,
+            assignedToId,
+            assignedToName,
+            description,
+            targetDate
+        });
+        await newReq.save();
+        
+        io.emit('new_help_request', newReq);
+        
+        const subs = await PushSubscription.find({ userId: assignedToId });
+        const payload = {
+            title: "Nueva Solicitud de Apoyo",
+            body: `${requesterName} ha solicitado tu ayuda.`,
+            icon: "/icon.png"
+        };
+        for (const sub of subs) {
+            await sendPushNotification(JSON.parse(sub.subscription), payload);
+        }
+        res.status(201).json(newReq);
+    } catch (e) {
+        console.error('Error creando ticket', e);
+        res.status(500).json({ error: 'Error creando solicitud de ayuda' });
+    }
+});
+
+app.get('/api/helprequests/:userId', async (req, res) => {
+    try {
+        const reqs = await HelpRequest.find({
+            $or: [{ requesterId: req.params.userId }, { assignedToId: req.params.userId }]
+        }).sort({ createdAt: -1 });
+        res.json(reqs);
+    } catch (e) {
+        res.status(500).json({ error: 'Error obteniendo solicitudes' });
+    }
+});
+
+app.put('/api/helprequests/:id', async (req, res) => {
+    try {
+        const updated = await HelpRequest.findByIdAndUpdate(req.params.id, { status: req.body.status }, { new: true });
+        if (!updated) return res.status(404).json({ error: 'No encontrado' });
+        
+        io.emit('update_help_request', updated);
+        
+        const targetUserId = req.body.status === 'resuelto' ? updated.requesterId : updated.requesterId;
+        const subs = await PushSubscription.find({ userId: targetUserId });
+        const payload = {
+            title: "Actualización de Ticket de Apoyo",
+            body: `El ticket cambió a estado: ${updated.status}`,
+            icon: "/icon.png"
+        };
+        for (const sub of subs) {
+            await sendPushNotification(JSON.parse(sub.subscription), payload);
+        }
+        
+        res.json(updated);
+    } catch(e) {
+        res.status(500).json({ error: 'Error actualizando solicitud' });
     }
 });
 
