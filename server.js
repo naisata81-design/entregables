@@ -654,6 +654,10 @@ app.post('/api/it/maintenance', (req, res) => {
     res.json({ maintenance: globalMaintenanceMode });
 });
 
+app.get('/api/it/logs', (req, res) => {
+    res.json(serverLogs);
+});
+
 app.get('/api/it/backup', async (req, res) => {
     try {
         const users = await User.find({});
