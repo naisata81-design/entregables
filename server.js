@@ -3159,60 +3159,62 @@ io.on('connection', (socket) => {
 // --- Cron Job para Notificaciones de Feriados ---
 const sentHolidayNotifications = {};
 
-setInterval(() => {
+async function runCronRoutine() {
     try {
         const now = new Date();
         const mxTimeStr = now.toLocaleString('en-US', { timeZone: 'America/Mexico_City', hour12: false, hour: '2-digit', minute: '2-digit' });
         
-        // Ejecutar a las 08:00 AM CDMX
-        if (mxTimeStr === '08:00') {
-            const today = new Date(now.toLocaleString('en-US', { timeZone: 'America/Mexico_City' }));
+        // Ejecutar a las 08:00 AM CDMX o al ser invocado manualmente
+        const today = new Date(now.toLocaleString('en-US', { timeZone: 'America/Mexico_City' }));
+        
+        const getStr = (d) => {
+            const y = d.getFullYear();
+            const m = String(d.getMonth() + 1).padStart(2, '0');
+            const dd = String(d.getDate()).padStart(2, '0');
+            return `${y}-${m}-${dd}`;
+        };
+        
+        const todayStr = getStr(today);
+        
+        const inTwoDays = new Date(today);
+        inTwoDays.setDate(today.getDate() + 2);
+        const inTwoDaysStr = getStr(inTwoDays);
+
+        // Verificar si HOY es feriado y aún no hemos notificado
+        if (isHoliday(todayStr) && !sentHolidayNotifications[`today_${todayStr}`]) {
+            const reason = isHoliday(todayStr);
+            const title = "¡Día de Descanso!";
+            const body = `Hoy es un día de descanso oficial: ${reason}. ¡Disfruta tu día!`;
             
-            const getStr = (d) => {
-                const y = d.getFullYear();
-                const m = String(d.getMonth() + 1).padStart(2, '0');
-                const dd = String(d.getDate()).padStart(2, '0');
-                return `${y}-${m}-${dd}`;
-            };
+            await notifyAll({ title, body }).catch(e => console.error("Error push:", e));
+            sentHolidayNotifications[`today_${todayStr}`] = true;
+            console.log(`[Cron] Notificación de feriado enviada para hoy: ${todayStr}`);
+        }
+
+        // Verificar si en 2 DÍAS es feriado y aún no hemos notificado
+        if (isHoliday(inTwoDaysStr) && !sentHolidayNotifications[`prep_${inTwoDaysStr}`]) {
+            const reason = isHoliday(inTwoDaysStr);
+            const title = "¡Próximo Descanso!";
+            const body = `Prepárate: El ${inTwoDaysStr} será de descanso oficial por: ${reason}.`;
             
-            const todayStr = getStr(today);
-            
-            const inTwoDays = new Date(today);
-            inTwoDays.setDate(inTwoDays.getDate() + 2);
-            const inTwoDaysStr = getStr(inTwoDays);
-            
-            if (isHoliday(todayStr)) {
-                const flagKey = `holiday_today_${todayStr}`;
-                if (!sentHolidayNotifications[flagKey]) {
-                    sentHolidayNotifications[flagKey] = true;
-                    notifyAll({
-                        title: "¡Día Feriado!",
-                        body: "Hoy es día de descanso obligatorio por ley. ¡Que disfrutes tu día!"
-                    });
-                    console.log(`[Cron] Notificación de feriado enviada para hoy: ${todayStr}`);
-                }
-            }
-            
-            if (isHoliday(inTwoDaysStr)) {
-                const flagKey = `holiday_advance_${inTwoDaysStr}`;
-                if (!sentHolidayNotifications[flagKey]) {
-                    sentHolidayNotifications[flagKey] = true;
-                    notifyAll({
-                        title: "Próximo Descanso",
-                        body: `Recuerda que en 2 días (${inTwoDaysStr}) es día de descanso obligatorio por ley.`
-                    });
-                    console.log(`[Cron] Notificación preventiva enviada para el feriado: ${inTwoDaysStr}`);
-                }
-            }
+            await notifyAll({ title, body }).catch(e => console.error("Error push:", e));
+            sentHolidayNotifications[`prep_${inTwoDaysStr}`] = true;
+            console.log(`[Cron] Notificación preventiva enviada para el feriado: ${inTwoDaysStr}`);
         }
     } catch (e) {
         console.error('[Cron] Error verificando feriados:', e);
     }
-}, 60000); // Revisar cada minuto
-// --- IT Super Admin APIs ---
-app.get('/api/it/logs', (req, res) => {
-    res.json(serverLogs);
-});
+}
+
+global.runCronRoutine = runCronRoutine;
+
+setInterval(() => {
+    const now = new Date();
+    const mxTimeStr = now.toLocaleString('en-US', { timeZone: 'America/Mexico_City', hour12: false, hour: '2-digit', minute: '2-digit' });
+    if (mxTimeStr === '08:00') {
+        runCronRoutine();
+    }
+}, 60000);
 
 app.post('/api/it/broadcast', async (req, res) => {
     try {
