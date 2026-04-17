@@ -404,13 +404,16 @@ async function calcularEstadisticasAsistenciaUsuario(user) {
 
     let iterDate = new Date(startTrackingDate);
     while (iterDate <= hoy) {
-        iterDate.setHours(12, 0, 0, 0);
-        const tsStr = iterDate.toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
-        const dayOfWeek = new Date(iterDate.toLocaleString('en-US', { timeZone: 'America/Mexico_City' })).getDay();
-
-        let horarioDia = (user.usaHorarioPersonalizado && user.horariosPorDia)
-            ? user.horariosPorDia.find(h => h.dia === dayOfWeek)
-            : globalHorarios.find(h => h.dia === dayOfWeek);
+                  // Normalizar iterDate al mediodía para evitar saltos de día por zona horaria
+                  iterDate.setHours(12, 0, 0, 0);
+                  const tsStr = iterDate.toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
+                  
+                  // Calcular el día de la semana basado en la fecha local de CDMX
+                  const dayOfWeek = new Date(iterDate.toLocaleString('en-US', { timeZone: 'America/Mexico_City' })).getDay();
+                  
+                  let horarioDia = (user.usaHorarioPersonalizado && user.horariosPorDia)
+                      ? user.horariosPorDia.find(h => h.dia === dayOfWeek)
+                      : globalHorarios.find(h => h.dia === dayOfWeek);
 
         if (horarioDia && horarioDia.activo && horarioDia.entrada && !isVacation(tsStr)) {
             if (!checkinDatesStr.has(tsStr)) {
@@ -726,7 +729,11 @@ app.get('/api/users/:id/dashboard-stats', async (req, res) => {
         const user = await User.findById(userId).select('nombre apellido diasVacacionesDisponibles horariosPorDia usaHorarioPersonalizado rol fechaIngreso fechaReinicioAsistencia');
         if (!user) return res.status(404).json({ error: 'Usuario no encontrado.' });
 
-        const fullName = `${user.nombre} ${user.apellido}`;
+        const nombreLimpio = user.nombre ? user.nombre.trim() : '';
+        const apellidoLimpio = user.apellido ? user.apellido.trim() : '';
+        const fullName = `${nombreLimpio} ${apellidoLimpio}`.trim();
+        const nameVariations = [fullName, nombreLimpio, `${nombreLimpio} `, `${nombreLimpio} undefined`];
+        const respQuery = { $in: nameVariations.map(s => new RegExp(`^${s}`, 'i')) };
 
         // 1. Calcular Asistencias a través de Helper Compartido
         const stats = await calcularEstadisticasAsistenciaUsuario(user);
@@ -736,7 +743,7 @@ app.get('/api/users/:id/dashboard-stats', async (req, res) => {
 
         // 2. Calcular herramientas prestadas al empleado (Inventario Actual)
         const transactions = await InventoryTransaction.find({
-            responsable: { $in: [fullName, user.nombre, user.nombre.trim()] }
+            responsable: respQuery
         }).populate('itemId');
         const countMap = {}; // itemId -> net quantity
 
@@ -763,7 +770,7 @@ app.get('/api/users/:id/dashboard-stats', async (req, res) => {
         const sevenDaysAgo = new Date();
         sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
         const weeklyTransactionsRaw = await InventoryTransaction.find({
-            responsable: { $in: [fullName, user.nombre, user.nombre.trim()] },
+            responsable: respQuery,
             fecha: { $gte: sevenDaysAgo }
         }).sort({ fecha: -1 }).populate('itemId');
 
@@ -780,7 +787,7 @@ app.get('/api/users/:id/dashboard-stats', async (req, res) => {
 
         // 4. Calcular eventos para el calendario nuevo (Faltas, Retardos, Vehiculos, Checkins)
         const vehicleTx = await VehicleTransaction.find({
-            responsable: { $in: [fullName, user.nombre, user.nombre ? user.nombre.trim() : ''] }
+            $or: [ { userId: user._id.toString() }, { userName: respQuery }, { responsable: respQuery } ]
         }).sort({ fecha: 1 }).populate('vehicleId');
 
         let eventosCalendario = {};
@@ -806,38 +813,36 @@ app.get('/api/users/:id/dashboard-stats', async (req, res) => {
             eventosCalendario[rDate].retardo = true;
         }
 
+                const pushVehiculosToCalendar = (startTx, endTx) => {
+            const startStr = new Date(startTx.fecha).toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
+            const endStr = endTx ? new Date(endTx.fecha).toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' }) : new Date().toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
+            
+            let iter = new Date(startStr + 'T12:00:00Z');
+            const end = new Date(endStr + 'T12:00:00Z');
+            
+            while (iter <= end) {
+                const dStr = iter.toISOString().split('T')[0];
+                if (!eventosCalendario[dStr]) eventosCalendario[dStr] = { falta: false, retardo: false, vehiculos: [], checkins: [] };
+                const vName = startTx.vehicleId ? `${startTx.vehicleId.marca} ${startTx.vehicleId.modelo || ''}`.trim() : 'Vehículo';
+                if (!eventosCalendario[dStr].vehiculos.includes(vName)) {
+                    eventosCalendario[dStr].vehiculos.push(vName);
+                }
+                iter.setDate(iter.getDate() + 1);
+            }
+        };
+
         // Agregar vehículos asignados
         let currentSalida = null;
         for (const tx of vehicleTx) {
             if (tx.tipoMovimiento === 'Préstamo') {
                 currentSalida = tx;
             } else if (tx.tipoMovimiento === 'Devolución' && currentSalida) {
-                let d = new Date(currentSalida.fecha);
-                let end = new Date(tx.fecha);
-                while (d <= end) {
-                    const dStr = d.toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
-                    if (!eventosCalendario[dStr]) eventosCalendario[dStr] = { falta: false, retardo: false, vehiculos: [], checkins: [] };
-                    const vName = currentSalida.vehicleId ? `${currentSalida.vehicleId.marca} ${currentSalida.vehicleId.modelo || ''}`.trim() : 'Vehículo';
-                    if (!eventosCalendario[dStr].vehiculos.includes(vName)) {
-                        eventosCalendario[dStr].vehiculos.push(vName);
-                    }
-                    d.setDate(d.getDate() + 1);
-                }
+                pushVehiculosToCalendar(currentSalida, tx);
                 currentSalida = null;
             }
         }
         if (currentSalida) {
-            let d = new Date(currentSalida.fecha);
-            let end = new Date();
-            while (d <= end) {
-                const dStr = d.toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
-                if (!eventosCalendario[dStr]) eventosCalendario[dStr] = { falta: false, retardo: false, vehiculos: [], checkins: [] };
-                const vName = currentSalida.vehicleId ? `${currentSalida.vehicleId.marca} ${currentSalida.vehicleId.modelo || ''}`.trim() : 'Vehículo';
-                if (!eventosCalendario[dStr].vehiculos.includes(vName)) {
-                    eventosCalendario[dStr].vehiculos.push(vName);
-                }
-                d.setDate(d.getDate() + 1);
-            }
+            pushVehiculosToCalendar(currentSalida, null);
         }
 
         res.json({
