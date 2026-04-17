@@ -80,7 +80,8 @@ const UserSchema = new mongoose.Schema({
     terminosAceptados: { type: Boolean, default: false },
     evidenciaTerminos: { type: String, default: '' },
     estadoCuenta: { type: String, enum: ['pendiente', 'activa', 'rechazada'] },
-    numeroEmpleado: { type: Number, unique: true, sparse: true }
+    numeroEmpleado: { type: Number, unique: true, sparse: true },
+    faceDescriptor: { type: [Number], default: [] }
 }, { timestamps: true });
 const User = mongoose.model('User', UserSchema);
 
@@ -3069,6 +3070,65 @@ app.post('/api/zk-checkin', async (req, res) => {
     } catch (e) {
         console.error('Error procesando ZK CheckIn:', e);
         res.status(500).json({ error: 'Error del servidor procesando ZK CheckIn' });
+    }
+});
+
+// --- Facial Recognition Endpoints ---
+app.get('/api/users/faces', async (req, res) => {
+    try {
+        const users = await User.find({ faceDescriptor: { $exists: true, $ne: [] } }, 'nombre apellido faceDescriptor');
+        res.json(users);
+    } catch (e) {
+        res.status(500).json({ error: 'Error fetching faces' });
+    }
+});
+
+app.post('/api/register-face', async (req, res) => {
+    try {
+        const { targetUserId, faceDescriptor } = req.body;
+        // Basic security: only accept requests if it has data
+        if (!targetUserId || !faceDescriptor || faceDescriptor.length === 0) {
+            return res.status(400).json({ error: 'Datos insuficientes.' });
+        }
+        
+        const user = await User.findById(targetUserId);
+        if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
+        
+        user.faceDescriptor = faceDescriptor;
+        await user.save();
+        res.json({ message: 'Rostro registrado con éxito' });
+    } catch (e) {
+        res.status(500).json({ error: 'Error interno registrando rostro.' });
+    }
+});
+
+app.post('/api/face-checkin', async (req, res) => {
+    try {
+        const { userId, tipo } = req.body;
+        if (!userId || !tipo) return res.status(400).json({ error: 'Faltan datos.' });
+
+        const user = await User.findById(userId);
+        if (!user) return res.status(404).json({ error: 'Usuario no encontrado.' });
+
+        const faceSvg = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="250" height="250" style="background:%230f172a;"><circle cx="125" cy="100" r="45" fill="none" stroke="%238b5cf6" stroke-width="8"/><path d="M 100 90 Q 110 80 120 90" fill="none" stroke="%238b5cf6" stroke-width="6" stroke-linecap="round"/><path d="M 130 90 Q 140 80 150 90" fill="none" stroke="%238b5cf6" stroke-width="6" stroke-linecap="round"/><path d="M 110 115 Q 125 125 140 115" fill="none" stroke="%238b5cf6" stroke-width="6" stroke-linecap="round"/><text x="50%" y="78%" dominant-baseline="middle" text-anchor="middle" fill="white" font-family="Arial, sans-serif" font-weight="bold" font-size="24">Face-ID</text><text x="50%" y="90%" dominant-baseline="middle" text-anchor="middle" fill="%2394a3b8" font-family="Arial, sans-serif" font-size="16">Reconocimiento Facial</text></svg>';
+
+        const newCheckIn = new CheckIn({
+            userId: user._id.toString(),
+            userName: `${user.nombre} ${user.apellido}`,
+            tipo: tipo, // Entrada or Salida
+            servicio: 'Oficina (Reconocimiento Facial)',
+            ubicacion: { lat: 0, lng: 0 },
+            foto: faceSvg,
+            timestamp: new Date()
+        });
+        
+        await newCheckIn.save();
+        io.emit('new_checkin', newCheckIn);
+        
+        res.status(201).json({ message: 'Asistencia registrada correctamente.', checkIn: newCheckIn, user: user });
+    } catch (e) {
+        console.error('Error procesando Face CheckIn:', e);
+        res.status(500).json({ error: 'Error del servidor procesando asistencia facial' });
     }
 });
 
