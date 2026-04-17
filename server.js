@@ -848,6 +848,15 @@ app.get('/api/users', async (req, res) => {
 });
 
 // 1.2.0 Obtener Usuarios Pendientes de Aprobación
+app.get('/api/users/faces', async (req, res) => {
+    try {
+        const users = await User.find({ faceDescriptor: { $exists: true, $ne: [] } }, 'nombre apellido faceDescriptor');
+        res.json(users);
+    } catch (e) {
+        res.status(500).json({ error: 'Error fetching faces' });
+    }
+});
+
 app.get('/api/users/pending', async (req, res) => {
     try {
         const pendingUsers = await User.find({ estadoCuenta: 'pendiente' }).select('-password -firma').sort({ createdAt: -1 });
@@ -3074,14 +3083,6 @@ app.post('/api/zk-checkin', async (req, res) => {
 });
 
 // --- Facial Recognition Endpoints ---
-app.get('/api/users/faces', async (req, res) => {
-    try {
-        const users = await User.find({ faceDescriptor: { $exists: true, $ne: [] } }, 'nombre apellido faceDescriptor');
-        res.json(users);
-    } catch (e) {
-        res.status(500).json({ error: 'Error fetching faces' });
-    }
-});
 
 app.post('/api/register-face', async (req, res) => {
     try {
