@@ -169,6 +169,17 @@ const AiRuleSchema = new mongoose.Schema({
 });
 const AiRule = mongoose.model('AiRule', AiRuleSchema);
 
+const AiLogSchema = new mongoose.Schema({
+    timestamp: { type: Date, default: Date.now },
+    eventType: String,
+    details: String,
+    prompt: String,
+    response: String,
+    oldCode: String,
+    newCode: String
+});
+const AiLog = mongoose.model('AiLog', AiLogSchema);
+
 const NotificationSchema = new mongoose.Schema({
     userId: { type: String, required: true }, // Puede ser el ID de usuario o los strings especiales 'all', 'admins'
     titulo: { type: String, required: true },
@@ -2664,6 +2675,44 @@ app.post('/api/inventory', async (req, res) => {
 
         const responseObj = { ...newItem.toObject(), id: newItem._id.toString() };
         io.emit('new_inventory_item', responseObj);
+        
+        // --- AUTO-INDUCTION (Gemini) ---
+        (async () => {
+            try {
+                addLogLine('AI-INDUCT', `Analizando nuevo artículo: ${nombre}`);
+                const items = await mongoose.model('InventoryItem').find({});
+                const itemNames = items.map(i => i.nombre);
+                const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+                const prompt = `
+Se acaba de agregar "${nombre}" a nuestro inventario.
+Aquí tienes el catálogo completo actual: ${JSON.stringify(itemNames)}.
+¿Con cuáles de los artículos existentes hace pareja lógicamente este nuevo artículo?
+Genera un arreglo JSON de reglas de asociación usando el nuevo artículo como disparador (triggerKeyword) y los existentes como sugeridos (targetKeyword).
+Formato estricto: [ { "triggerKeyword": "NOMBRE", "targetKeyword": "SUGERIDO", "codeFormula": "return triggerQty;" } ]
+Solo devuelve el arreglo JSON válido, sin explicaciones ni formato markdown de código (\`\`\`json).
+`;
+                const result = await model.generateContent(prompt);
+                let rawResp = result.response.text().trim();
+                rawResp = rawResp.replace(/```json/g, '').replace(/```/g, '').trim();
+                let newRules = JSON.parse(rawResp);
+                if (Array.isArray(newRules)) {
+                    for (let r of newRules) {
+                        const exists = await AiRule.findOne({ triggerKeyword: r.triggerKeyword, targetKeyword: r.targetKeyword });
+                        if (!exists) {
+                            await AiRule.create({
+                                triggerKeyword: r.triggerKeyword, targetKeyword: r.targetKeyword,
+                                codeFormula: r.codeFormula, confidence: 0.7, isActive: true
+                            });
+                        }
+                    }
+                }
+                await AiLog.create({
+                    eventType: 'INSPECTION', details: `Análisis automático del nuevo artículo: ${nombre}`,
+                    prompt: prompt, response: rawResp
+                });
+            } catch(e) { console.error("Error auto-induction:", e); }
+        })();
+
         res.status(201).json(responseObj);
     } catch (e) {
         if (e.code === 11000) {
@@ -2871,11 +2920,21 @@ Ejemplo de formato estricto esperado: return Math.max(1, Math.ceil(triggerQty / 
                     let newCode = result.response.text().trim();
                     newCode = newCode.replace(/```javascript/g, '').replace(/```js/g, '').replace(/```/g, '').trim();
                     
+                    const oldCode = rule.codeFormula;
                     rule.codeFormula = newCode;
                     rule.successCount = 0;
                     rule.failCount = 0;
                     rule.lastEvolvedAt = new Date();
                     addLogLine('AI-EVOLVE', `Gemini programó nueva fórmula: ${newCode}`);
+
+                    await AiLog.create({
+                        eventType: 'EVOLUTION',
+                        details: `Regla auto-programada para ${rule.targetKeyword}`,
+                        prompt: prompt,
+                        response: result.response.text(),
+                        oldCode: oldCode,
+                        newCode: newCode
+                    });
                 } catch (geminiErr) {
                     console.error("Gemini Error:", geminiErr);
                     // Fallback matemático básico
@@ -2892,6 +2951,75 @@ Ejemplo de formato estricto esperado: return Math.max(1, Math.ceil(triggerQty / 
         res.json({ success: true, rule });
     } catch (e) {
         res.status(500).json({ error: 'AI Error' });
+    }
+});
+
+app.get('/api/ai/logs', async (req, res) => {
+    try {
+        const logs = await AiLog.find().sort({ timestamp: -1 }).limit(50);
+        res.json(logs);
+    } catch(e) { res.status(500).json({error: 'Error'}); }
+});
+
+app.get('/api/ai/rules', async (req, res) => {
+    try {
+        const rules = await AiRule.find().sort({ triggerKeyword: 1 });
+        res.json(rules);
+    } catch(e) { res.status(500).json({error: 'Error'}); }
+});
+
+app.post('/api/ai/bootstrap', async (req, res) => {
+    try {
+        addLogLine('AI-BOOTSTRAP', 'Iniciando escaneo global del inventario con Gemini...');
+        const items = await mongoose.model('InventoryItem').find({});
+        const itemNames = items.map(i => i.nombre);
+        
+        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+        const prompt = `
+Eres un experto en inventarios de TI, telecomunicaciones y redes.
+Aquí tienes el catálogo completo de nuestra empresa:
+${JSON.stringify(itemNames)}
+
+Analiza para qué sirve cada artículo y encuentra relaciones operativas lógicas entre ellos (qué herramientas se usan juntas, qué insumos dependen de otros, etc).
+Genera un arreglo JSON estricto de reglas de asociación. Por ejemplo, si alguien saca "FUSIONADORA", debería sugerir "MANGAS".
+No relaciones cosas obvias o redundantes. Limítate a las 10 o 20 asociaciones más críticas y útiles.
+Formato estricto:
+[
+  { "triggerKeyword": "NOMBRE EN MAYUSCULAS DEL DISPARADOR", "targetKeyword": "NOMBRE EN MAYUSCULAS DEL SUGERIDO", "codeFormula": "return Math.max(1, triggerQty * 2);" }
+]
+Retorna ÚNICAMENTE un arreglo JSON válido, sin explicaciones, sin markdown de código (\`\`\`json), nada más. Solo el arreglo [].
+`;
+        const result = await model.generateContent(prompt);
+        let rawResponse = result.response.text().trim();
+        rawResponse = rawResponse.replace(/```json/g, '').replace(/```/g, '').trim();
+        
+        let newRules = JSON.parse(rawResponse);
+        if (Array.isArray(newRules)) {
+            for (let r of newRules) {
+                const exists = await AiRule.findOne({ triggerKeyword: r.triggerKeyword, targetKeyword: r.targetKeyword });
+                if (!exists) {
+                    await AiRule.create({
+                        triggerKeyword: r.triggerKeyword,
+                        targetKeyword: r.targetKeyword,
+                        codeFormula: r.codeFormula,
+                        confidence: 0.8,
+                        isActive: true
+                    });
+                }
+            }
+        }
+        
+        await AiLog.create({
+            eventType: 'BOOTSTRAP',
+            details: 'Escaneo global de inventario completado',
+            prompt: prompt,
+            response: rawResponse
+        });
+        
+        res.json({ success: true, count: newRules.length });
+    } catch(e) {
+        console.error(e);
+        res.status(500).json({error: 'Error en Bootstrap'});
     }
 });
 
@@ -3439,5 +3567,6 @@ app.post('/api/it/simulate-cron', (req, res) => {
     }
 });
 // ---------------------------
+
 
 
