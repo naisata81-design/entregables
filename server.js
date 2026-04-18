@@ -3174,7 +3174,7 @@ app.post('/api/helprequests', async (req, res) => {
             icon: "/icon.png"
         };
         for (const sub of subs) {
-            await sendPushNotification(JSON.parse(sub.subscription), payload);
+            await sendPushNotification(sub.subscription, payload);
         }
         res.status(201).json(newReq);
     } catch (e) {
@@ -3209,7 +3209,7 @@ app.put('/api/helprequests/:id', async (req, res) => {
             icon: "/icon.png"
         };
         for (const sub of subs) {
-            await sendPushNotification(JSON.parse(sub.subscription), payload);
+            await sendPushNotification(sub.subscription, payload);
         }
         
         res.json(updated);
