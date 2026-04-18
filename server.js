@@ -751,7 +751,7 @@ app.post('/api/bug-report', async (req, res) => {
 
 
 // --- Endpoints Notificaciones Web Push ---
-app.post('/api/notifications/subscribe', async (req, res) => {
+app.post('/api/inapp-notifs/subscribe', async (req, res) => {
     try {
         const { userId, role, subscription } = req.body;
         if (!userId || !subscription) return res.status(400).json({ error: 'Faltan parámetros' });
@@ -769,7 +769,7 @@ app.post('/api/notifications/subscribe', async (req, res) => {
 });
 
 // Obtener Notificaciones In-App
-app.get('/api/notifications/:userId', async (req, res) => {
+app.get('/api/inapp-notifs/:userId', async (req, res) => {
     try {
         const { userId } = req.params;
         const { role } = req.query; // Para obtener también las globales si es admin
@@ -790,7 +790,7 @@ app.get('/api/notifications/:userId', async (req, res) => {
 });
 
 // Marcar notificación como leída
-app.put('/api/notifications/:id/read', async (req, res) => {
+app.put('/api/inapp-notifs/:id/read', async (req, res) => {
     try {
         const { id } = req.params;
         await NotificationModel.findByIdAndUpdate(id, { leido: true });
@@ -801,7 +801,7 @@ app.put('/api/notifications/:id/read', async (req, res) => {
 });
 
 // Marcar TODAS como leídas
-app.put('/api/notifications/read-all/:userId', async (req, res) => {
+app.put('/api/inapp-notifs/read-all/:userId', async (req, res) => {
     try {
         const { userId } = req.params;
         const { role } = req.body;
