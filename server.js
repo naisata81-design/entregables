@@ -2839,7 +2839,7 @@ app.post('/api/ai/suggest', async (req, res) => {
 
 app.post('/api/ai/feedback', async (req, res) => {
     try {
-        const { ruleId, accepted, triggerQty, suggestedQty, actualQty } = req.body;
+        const { ruleId, accepted, triggerQty, suggestedQty, actualQty, userReason } = req.body;
         const rule = await AiRule.findById(ruleId);
         if (!rule) return res.status(404).json({ error: 'Rule not found' });
         
@@ -2860,7 +2860,9 @@ Tu objetivo es arreglar la fórmula matemática en código JavaScript.
 La regla actual para calcular cuántas unidades de "${rule.targetKeyword}" se necesitan basándose en la cantidad de "${rule.triggerKeyword}" es:
 ${rule.codeFormula}
 
-Esta regla acaba de fallar miserablemente. El usuario metió ${triggerQty} de "${rule.triggerKeyword}", la IA sugirió ${suggestedQty} de "${rule.targetKeyword}", pero el usuario la rechazó. ${actualQty ? 'El usuario en realidad necesitaba '+actualQty : ''}
+Esta regla acaba de fallar miserablemente. El usuario metió ${triggerQty} de "${rule.triggerKeyword}", la IA sugirió ${suggestedQty} de "${rule.targetKeyword}", pero el usuario la rechazó. ${actualQty ? 'El usuario en realidad necesitaba '+actualQty+'.' : ''}
+${userReason ? 'El usuario te dejó este mensaje explicando tu error: "' + userReason + '". Ajusta tu lógica matemática basándote en esta explicación humana.' : ''}
+
 Re-escribe la fórmula matemática en un código JavaScript limpio y puro (SIN bloques markdown de código, SIN la palabra javascript, SOLO la línea de código).
 Debe tomar la variable global 'triggerQty' y retornar la cantidad numérica sugerida utilizando Math.
 Ejemplo de formato estricto esperado: return Math.max(1, Math.ceil(triggerQty / 3));
