@@ -2693,8 +2693,20 @@ Solo devuelve el arreglo JSON válido, sin explicaciones ni formato markdown de 
 `;
                 const result = await model.generateContent(prompt);
                 let rawResp = result.response.text().trim();
-                rawResp = rawResp.replace(/```json/g, '').replace(/```/g, '').trim();
-                let newRules = JSON.parse(rawResp);
+                const jsonMatch = rawResp.match(/\[[\s\S]*\]/);
+                if (jsonMatch) {
+                    rawResp = jsonMatch[0];
+                } else {
+                    rawResp = rawResp.replace(/^```json\s*/g, '').replace(/^```\s*/g, '').replace(/```\s*$/g, '').trim();
+                }
+                
+                let newRules;
+                try {
+                    newRules = JSON.parse(rawResp);
+                } catch(e) {
+                    console.error("Auto-Induct JSON Parse Error. Raw:", rawResp);
+                    return;
+                }
                 if (Array.isArray(newRules)) {
                     for (let r of newRules) {
                         const exists = await AiRule.findOne({ triggerKeyword: r.triggerKeyword, targetKeyword: r.targetKeyword });
@@ -2991,9 +3003,21 @@ Retorna ÚNICAMENTE un arreglo JSON válido, sin explicaciones, sin markdown de 
 `;
         const result = await model.generateContent(prompt);
         let rawResponse = result.response.text().trim();
-        rawResponse = rawResponse.replace(/```json/g, '').replace(/```/g, '').trim();
+        const jsonMatch = rawResponse.match(/\[[\s\S]*\]/);
+        if (jsonMatch) {
+            rawResponse = jsonMatch[0];
+        } else {
+            rawResponse = rawResponse.replace(/^```json\s*/g, '').replace(/^```\s*/g, '').replace(/```\s*$/g, '').trim();
+        }
         
-        let newRules = JSON.parse(rawResponse);
+        let newRules;
+        try {
+            newRules = JSON.parse(rawResponse);
+        } catch (parseErr) {
+            console.error("JSON Parse Error. Raw Gemini Response:", rawResponse);
+            throw new Error("Gemini did not return valid JSON");
+        }
+        
         if (Array.isArray(newRules)) {
             for (let r of newRules) {
                 const exists = await AiRule.findOne({ triggerKeyword: r.triggerKeyword, targetKeyword: r.targetKeyword });
@@ -3567,6 +3591,5 @@ app.post('/api/it/simulate-cron', (req, res) => {
     }
 });
 // ---------------------------
-
 
 
