@@ -279,12 +279,15 @@ const VehicleTransactionSchema = new mongoose.Schema({
     vehicleId: { type: mongoose.Schema.Types.ObjectId, ref: 'Vehicle', required: true },
     userId: { type: String, required: false },
     userName: { type: String, required: false },
-    tipoMovimiento: { type: String, enum: ['Salida', 'Devolucion', 'Préstamo'], required: true },
-    responsable: { type: String, required: true },
-    motivo: { type: String, required: true },
-    kilometraje: { type: Number, required: true },
-    firma: { type: String, required: true }, // Base64
+    tipoMovimiento: { type: String, enum: ['Salida', 'Devolucion', 'Devolución', 'Préstamo'], required: true },
+    responsable: { type: String, required: false },
+    motivo: { type: String, required: false },
+    kilometraje: { type: Number, required: false },
+    firma: { type: String, required: false }, // Base64
     firmaUsuario: { type: String, required: false }, // Base64
+    notas: { type: String, required: false },
+    bitacoraRevisada: { type: [String], default: [] },
+    imgReporteDanos: { type: String, required: false },
     estadoConfirmacion: { type: String, enum: ['Confirmado', 'Pendiente', 'Rechazado'], default: 'Confirmado' },
     fecha: { type: Date, default: Date.now }
 }, { timestamps: true });
