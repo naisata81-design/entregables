@@ -3397,7 +3397,7 @@ app.post('/api/face-checkin', async (req, res) => {
         });
 
         if (existingCheckIn) {
-            return res.status(400).json({ error: `Ya has registrado tu ${tipo.toLowerCase()} de hoy.` });
+            return res.status(400).json({ error: `Ya has registrado tu ${tipo.toLowerCase()} de hoy.`, user: user });
         }
 
         const newCheckIn = new CheckIn({
@@ -3593,5 +3593,4 @@ app.post('/api/it/simulate-cron', (req, res) => {
     }
 });
 // ---------------------------
-
 
