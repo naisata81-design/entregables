@@ -2880,7 +2880,12 @@ app.get('/api/assignments/pending/:userId', async (req, res) => {
         const fullName = `${user.nombre} ${user.apellido}`;
         
         const pendingInventory = await InventoryTransaction.find({ 
-            responsable: fullName, 
+            responsable: { $in: [
+                fullName,
+                user.nombre,
+                `${user.nombre} undefined`,
+                `${user.nombre} `.trim()
+            ] }, 
             estadoConfirmacion: 'Pendiente' 
         }).populate('itemId');
         
