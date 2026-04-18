@@ -9,7 +9,7 @@ const webpush = require('web-push');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 // Configuración Gemini (Para auto-programación de IA)
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.api_gemini || 'AIzaSyAx0uBoLQm1REE9uLmty--v7FJap7OT0zI';
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.api_gemini;
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 
 // Configuración Web Push (VAPID)
@@ -34,12 +34,12 @@ function addLogLine(level, ...args) {
 const originalLog = console.log;
 const originalError = console.error;
 
-console.log = function(...args) {
+console.log = function (...args) {
     addLogLine('INFO', ...args);
     originalLog.apply(console, args);
 };
 
-console.error = function(...args) {
+console.error = function (...args) {
     addLogLine('ERROR', ...args);
     originalError.apply(console, args);
 };
@@ -109,7 +109,7 @@ const BugReport = mongoose.model('BugReport', BugReportSchema);
 async function logAdminAction(adminCorreo, action, details) {
     try {
         await AdminAuditLog.create({ adminCorreo, action, details });
-    } catch(e) { console.error("Error logging admin action:", e); }
+    } catch (e) { console.error("Error logging admin action:", e); }
 }
 
 
@@ -118,10 +118,10 @@ async function asegurarNumeroEmpleado() {
     try {
         const usersSinNumero = await User.find({ numeroEmpleado: { $exists: false } }).sort({ createdAt: 1 });
         if (usersSinNumero.length === 0) return;
-        
+
         let maxEmpleado = await User.findOne({ numeroEmpleado: { $exists: true } }).sort({ numeroEmpleado: -1 });
         let nextNumber = maxEmpleado && maxEmpleado.numeroEmpleado ? maxEmpleado.numeroEmpleado + 1 : 101;
-        
+
         for (const u of usersSinNumero) {
             u.numeroEmpleado = nextNumber++;
             await u.save();
@@ -457,45 +457,45 @@ async function calcularVacacionesDinamicamente(user) {
 const isHoliday = (dateStr) => {
     const [y, m, d] = dateStr.split('-');
     const year = parseInt(y);
-        
+
     if (!isHoliday.cache) isHoliday.cache = {};
     if (!isHoliday.cache[year]) {
         const holidays = [];
         holidays.push(`${year}-01-01`); // Año Nuevo
-            
+
         const getFirstMonday = (yr, mo) => {
             let dt = new Date(yr, mo, 1);
-                while(dt.getDay() !== 1) { dt.setDate(dt.getDate() + 1); }
+            while (dt.getDay() !== 1) { dt.setDate(dt.getDate() + 1); }
             return dt;
         };
         const getNthMonday = (yr, mo, n) => {
             let dt = getFirstMonday(yr, mo);
-                dt.setDate(dt.getDate() + (n - 1) * 7);
+            dt.setDate(dt.getDate() + (n - 1) * 7);
             return dt;
         };
-            
+
         const febHoliday = getNthMonday(year, 1, 1);
         holidays.push(`${year}-02-${String(febHoliday.getDate()).padStart(2, '0')}`); // Día Constitución
-            
+
         const marHoliday = getNthMonday(year, 2, 3);
         holidays.push(`${year}-03-${String(marHoliday.getDate()).padStart(2, '0')}`); // Natalicio Benito Juárez
-            
+
         holidays.push(`${year}-05-01`); // Día del Trabajo
         holidays.push(`${year}-09-16`); // Independencia
-            
+
         if ((year - 2024) % 6 === 0) {
             holidays.push(`${year}-10-01`); // Transmisión poder
-            }
-            
+        }
+
         const novHoliday = getNthMonday(year, 10, 3);
         holidays.push(`${year}-11-${String(novHoliday.getDate()).padStart(2, '0')}`); // Revolución
-            
+
         holidays.push(`${year}-12-25`); // Navidad
-            
-            isHoliday.cache[year] = holidays;
-        }
+
+        isHoliday.cache[year] = holidays;
+    }
     return isHoliday.cache[year].includes(dateStr);
-    };
+};
 
 async function calcularEstadisticasAsistenciaUsuario(user) {
     const userId = user._id ? user._id.toString() : user.id;
@@ -538,16 +538,16 @@ async function calcularEstadisticasAsistenciaUsuario(user) {
 
     let iterDate = new Date(startTrackingDate);
     while (iterDate <= hoy) {
-                  // Normalizar iterDate al mediodía para evitar saltos de día por zona horaria
-                  iterDate.setHours(12, 0, 0, 0);
-                  const tsStr = iterDate.toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
-                  
-                  // Calcular el día de la semana basado en la fecha local de CDMX
-                  const dayOfWeek = new Date(iterDate.toLocaleString('en-US', { timeZone: 'America/Mexico_City' })).getDay();
-                  
-                  let horarioDia = (user.usaHorarioPersonalizado && user.horariosPorDia)
-                      ? user.horariosPorDia.find(h => h.dia === dayOfWeek)
-                      : globalHorarios.find(h => h.dia === dayOfWeek);
+        // Normalizar iterDate al mediodía para evitar saltos de día por zona horaria
+        iterDate.setHours(12, 0, 0, 0);
+        const tsStr = iterDate.toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
+
+        // Calcular el día de la semana basado en la fecha local de CDMX
+        const dayOfWeek = new Date(iterDate.toLocaleString('en-US', { timeZone: 'America/Mexico_City' })).getDay();
+
+        let horarioDia = (user.usaHorarioPersonalizado && user.horariosPorDia)
+            ? user.horariosPorDia.find(h => h.dia === dayOfWeek)
+            : globalHorarios.find(h => h.dia === dayOfWeek);
 
         if (horarioDia && horarioDia.activo && horarioDia.entrada && !isVacation(tsStr) && !isHoliday(tsStr)) {
             if (!checkinDatesStr.has(tsStr)) {
@@ -587,10 +587,10 @@ async function calcularEstadisticasAsistenciaUsuario(user) {
     }
 
     if (user.rol === 'socio') {
-         faltasTotales = 0;
-         retardosTotales = 0;
-         diasFalta = [];
-         diasRetardo = [];
+        faltasTotales = 0;
+        retardosTotales = 0;
+        diasFalta = [];
+        diasRetardo = [];
     }
 
     return {
@@ -702,14 +702,14 @@ app.get('/api/it/backup', async (req, res) => {
         const vacations = await mongoose.model('VacationRequest').find({});
         const vehicles = await mongoose.model('VehicleTransaction').find({});
         const helps = await mongoose.model('HelpRequest').find({});
-        
+
         const backupData = {
             timestamp: new Date(),
             users, checkins, vacations, vehicles, helps
         };
         logAdminAction('daniel@naisata.com', 'DOWNLOAD_BACKUP', 'Se generó un respaldo JSON global');
         res.json(backupData);
-    } catch(e) { res.status(500).json({ error: e.message }); }
+    } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.get('/api/it/active-users', (req, res) => {
@@ -745,7 +745,7 @@ app.post('/api/bug-report', async (req, res) => {
         const bug = new (mongoose.model('BugReport'))({ userCorreo: correo, description });
         await bug.save();
         res.json({ message: 'Reporte de bug enviado correctamente' });
-    } catch(e) { res.status(500).json({ error: e.message }); }
+    } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // -------------------------
 
@@ -755,7 +755,7 @@ app.post('/api/notifications/subscribe', async (req, res) => {
     try {
         const { userId, role, subscription } = req.body;
         if (!userId || !subscription) return res.status(400).json({ error: 'Faltan parámetros' });
-        
+
         await PushSubscription.findOneAndUpdate(
             { 'subscription.endpoint': subscription.endpoint }, // Si el endpoint existe, actualízalo
             { userId, role, subscription },
@@ -782,7 +782,7 @@ app.get('/api/notifications/:userId', async (req, res) => {
         const notifications = await NotificationModel.find({ userId: { $in: queryIds } })
             .sort({ createdAt: -1 })
             .limit(50); // Cargar las últimas 50
-        
+
         res.json(notifications);
     } catch (e) {
         res.status(500).json({ error: 'Error obteniendo notificaciones.' });
@@ -1009,7 +1009,7 @@ app.get('/api/users/:id/dashboard-stats', async (req, res) => {
 
         // 4. Calcular eventos para el calendario nuevo (Faltas, Retardos, Vehiculos, Checkins)
         const vehicleTx = await VehicleTransaction.find({
-            $or: [ { userId: user._id.toString() }, { userName: respQuery }, { responsable: respQuery } ]
+            $or: [{ userId: user._id.toString() }, { userName: respQuery }, { responsable: respQuery }]
         }).sort({ fecha: 1 }).populate('vehicleId');
 
         let eventosCalendario = {};
@@ -1019,7 +1019,7 @@ app.get('/api/users/:id/dashboard-stats', async (req, res) => {
             if (!eventosCalendario[dateStr]) eventosCalendario[dateStr] = { falta: false, retardo: false, vehiculos: [], checkins: [] };
             eventosCalendario[dateStr].checkins = checks.map(c => ({
                 tipo: c.tipo,
-                time: new Date(c.timestamp).toLocaleTimeString('en-US', { timeZone: 'America/Mexico_City', hour: '2-digit', minute:'2-digit' })
+                time: new Date(c.timestamp).toLocaleTimeString('en-US', { timeZone: 'America/Mexico_City', hour: '2-digit', minute: '2-digit' })
             }));
         }
 
@@ -1035,13 +1035,13 @@ app.get('/api/users/:id/dashboard-stats', async (req, res) => {
             eventosCalendario[rDate].retardo = true;
         }
 
-                const pushVehiculosToCalendar = (startTx, endTx) => {
+        const pushVehiculosToCalendar = (startTx, endTx) => {
             const startStr = new Date(startTx.fecha).toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
             const endStr = endTx ? new Date(endTx.fecha).toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' }) : new Date().toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
-            
+
             let iter = new Date(startStr + 'T12:00:00Z');
             const end = new Date(endStr + 'T12:00:00Z');
-            
+
             while (iter <= end) {
                 const dStr = iter.toISOString().split('T')[0];
                 if (!eventosCalendario[dStr]) eventosCalendario[dStr] = { falta: false, retardo: false, vehiculos: [], checkins: [] };
@@ -1059,10 +1059,10 @@ app.get('/api/users/:id/dashboard-stats', async (req, res) => {
         yearsToCheck.forEach(year => {
             const holidays = [];
             holidays.push(`${year}-01-01`);
-            
+
             const getFirstMonday = (yr, mo) => {
                 let dt = new Date(yr, mo, 1);
-                while(dt.getDay() !== 1) { dt.setDate(dt.getDate() + 1); }
+                while (dt.getDay() !== 1) { dt.setDate(dt.getDate() + 1); }
                 return dt;
             };
             const getNthMonday = (yr, mo, n) => {
@@ -1070,23 +1070,23 @@ app.get('/api/users/:id/dashboard-stats', async (req, res) => {
                 dt.setDate(dt.getDate() + (n - 1) * 7);
                 return dt;
             };
-            
+
             const febHoliday = getNthMonday(year, 1, 1);
             holidays.push(`${year}-02-${String(febHoliday.getDate()).padStart(2, '0')}`);
-            
+
             const marHoliday = getNthMonday(year, 2, 3);
             holidays.push(`${year}-03-${String(marHoliday.getDate()).padStart(2, '0')}`);
-            
+
             holidays.push(`${year}-05-01`);
             holidays.push(`${year}-09-16`);
-            
+
             if ((year - 2024) % 6 === 0) {
                 holidays.push(`${year}-10-01`);
             }
-            
+
             const novHoliday = getNthMonday(year, 10, 3);
             holidays.push(`${year}-11-${String(novHoliday.getDate()).padStart(2, '0')}`);
-            
+
             holidays.push(`${year}-12-25`);
 
             for (const hDate of holidays) {
@@ -1302,7 +1302,7 @@ app.put('/api/personal-equipment/:id/missing', async (req, res) => {
     try {
         const { id } = req.params;
         const { isMissing } = req.body;
-        
+
         const eq = await PersonalEquipment.findById(id);
         if (!eq) return res.status(404).json({ error: 'Equipo no encontrado.' });
 
@@ -1334,7 +1334,7 @@ app.delete('/api/personal-equipment/:id', async (req, res) => {
     try {
         const { id } = req.params;
         const eq = await PersonalEquipment.findByIdAndDelete(id);
-        if(!eq) return res.status(404).json({ error: 'Equipo no encontrado' });
+        if (!eq) return res.status(404).json({ error: 'Equipo no encontrado' });
 
         io.emit('delete_personal_equipment', id);
         res.json({ message: 'Equipo eliminado/dado de baja exitosamente.' });
@@ -1620,14 +1620,14 @@ app.post('/api/vehicles/:id/loan', async (req, res) => {
             estadoConfirmacion: 'Pendiente'
         });
         await tx.save();
-        
+
         if (userId !== 'EXTERNO') {
             notifyUserByName(userName, {
                 title: "Vehículo Asignado",
                 body: `Se te ha asignado un vehículo. Por favor, abre la app para firmar de conformidad.`
             });
         }
-        
+
         res.status(200).json({ message: 'Vehículo en proceso de asignación (Firma pendiente).', transaction: tx });
     } catch (e) {
         res.status(500).json({ error: 'Error interno asignando.' });
@@ -1659,7 +1659,7 @@ app.post('/api/vehicles/:id/return', async (req, res) => {
             imgReporteDanos
         });
         await tx.save();
-        
+
         if (userId !== 'EXTERNO') {
             notifyUser(userId, {
                 title: "Vehículo Devuelto",
@@ -1678,7 +1678,7 @@ app.get('/api/users/:id/vehicles', async (req, res) => {
         const oneYearAgo = new Date();
         oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
 
-        const txs = await VehicleTransaction.find({ 
+        const txs = await VehicleTransaction.find({
             userId: req.params.id,
             fecha: { $gte: oneYearAgo }
         }).sort({ fecha: -1 }).populate('vehicleId');
@@ -1699,8 +1699,8 @@ app.get('/api/vehicles/:id/history', async (req, res) => {
     try {
         const oneYearAgo = new Date();
         oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
-        
-        const txs = await VehicleTransaction.find({ 
+
+        const txs = await VehicleTransaction.find({
             vehicleId: req.params.id,
             fecha: { $gte: oneYearAgo }
         }).sort({ fecha: -1 }).populate('vehicleId');
@@ -2402,7 +2402,7 @@ app.post('/api/avisos', async (req, res) => {
             requiereActualizacion
         });
         await nuevoAviso.save();
-        
+
         notifyAll({
             title: `Aviso: ${titulo}`,
             body: mensaje
@@ -2453,7 +2453,7 @@ app.put('/api/vacations/:id/status', async (req, res) => {
         }
 
         await request.save();
-        
+
         notifyUser(request.userId, {
             title: "Actualización de Solicitud",
             body: `Tu solicitud de vacaciones ha sido ${estado.toUpperCase()}.`
@@ -2485,7 +2485,7 @@ app.post('/api/projects', async (req, res) => {
         await newProject.save();
         const responseObj = { ...newProject.toObject(), id: newProject._id.toString() };
         io.emit('new_project', responseObj);
-        
+
         notifyAll({
             title: "Nuevo Proyecto Documental",
             body: `Se ha abierto un nuevo archivo de proyecto: ${nombre}.`
@@ -2540,7 +2540,7 @@ app.post('/api/plans', upload.single('imagen'), async (req, res) => {
 
         const responseObj = { ...newPlan.toObject(), id: newPlan._id.toString() };
         io.emit('new_plan', responseObj);
-        
+
         notifyAll({
             title: "Nuevo Plano Asignado",
             body: `Se ha subido el plano "${nombre}" a los documentos de proyecto.`
@@ -2675,7 +2675,7 @@ app.post('/api/inventory', async (req, res) => {
 
         const responseObj = { ...newItem.toObject(), id: newItem._id.toString() };
         io.emit('new_inventory_item', responseObj);
-        
+
         // --- AUTO-INDUCTION (Gemini) ---
         (async () => {
             try {
@@ -2699,11 +2699,11 @@ Solo devuelve el arreglo JSON válido, sin explicaciones ni formato markdown de 
                 } else {
                     rawResp = rawResp.replace(/^```json\s*/g, '').replace(/^```\s*/g, '').replace(/```\s*$/g, '').trim();
                 }
-                
+
                 let newRules;
                 try {
                     newRules = JSON.parse(rawResp);
-                } catch(e) {
+                } catch (e) {
                     console.error("Auto-Induct JSON Parse Error. Raw:", rawResp);
                     return;
                 }
@@ -2722,7 +2722,7 @@ Solo devuelve el arreglo JSON válido, sin explicaciones ni formato markdown de 
                     eventType: 'INSPECTION', details: `Análisis automático del nuevo artículo: ${nombre}`,
                     prompt: prompt, response: rawResp
                 });
-            } catch(e) { console.error("Error auto-induction:", e); }
+            } catch (e) { console.error("Error auto-induction:", e); }
         })();
 
         res.status(201).json(responseObj);
@@ -2867,15 +2867,15 @@ app.post('/api/inventory/:id/repair', async (req, res) => {
 // --- NAISA AI (El Cerebro) Endpoints ---
 app.post('/api/ai/suggest', async (req, res) => {
     try {
-        const { cartItems } = req.body; 
+        const { cartItems } = req.body;
         if (!cartItems || cartItems.length === 0) return res.json({ suggestions: [] });
-        
+
         const suggestions = [];
         const activeRules = await AiRule.find({ isActive: true });
-        
+
         for (const item of cartItems) {
-            const rule = activeRules.find(r => item.itemName.toUpperCase().includes(r.triggerKeyword.toUpperCase()));
-            if (rule) {
+            const matchedRules = activeRules.filter(r => item.itemName.toUpperCase().includes(r.triggerKeyword.toUpperCase()));
+            for (const rule of matchedRules) {
                 if (cartItems.some(c => c.itemName.toUpperCase().includes(rule.targetKeyword.toUpperCase()))) continue;
                 try {
                     const calcFunc = new Function('triggerQty', rule.codeFormula);
@@ -2889,7 +2889,7 @@ app.post('/api/ai/suggest', async (req, res) => {
                             ruleId: rule._id
                         });
                     }
-                } catch(e) { console.error("Error evaluando AI Rule:", e); }
+                } catch (e) { console.error("Error evaluando AI Rule:", e); }
             }
         }
         res.json({ suggestions });
@@ -2903,14 +2903,14 @@ app.post('/api/ai/feedback', async (req, res) => {
         const { ruleId, accepted, triggerQty, suggestedQty, actualQty, userReason } = req.body;
         const rule = await AiRule.findById(ruleId);
         if (!rule) return res.status(404).json({ error: 'Rule not found' });
-        
+
         if (accepted) {
             rule.successCount += 1;
             rule.confidence = Math.min(0.99, rule.confidence + 0.05);
         } else {
             rule.failCount += 1;
             rule.confidence = Math.max(0.1, rule.confidence - 0.05);
-            
+
             if (rule.failCount > rule.successCount * 2 && rule.failCount > 3) {
                 addLogLine('AI-EVOLVE', `Regla para ${rule.targetKeyword} mutando código usando Gemini...`);
                 try {
@@ -2921,7 +2921,7 @@ Tu objetivo es arreglar la fórmula matemática en código JavaScript.
 La regla actual para calcular cuántas unidades de "${rule.targetKeyword}" se necesitan basándose en la cantidad de "${rule.triggerKeyword}" es:
 ${rule.codeFormula}
 
-Esta regla acaba de fallar miserablemente. El usuario metió ${triggerQty} de "${rule.triggerKeyword}", la IA sugirió ${suggestedQty} de "${rule.targetKeyword}", pero el usuario la rechazó. ${actualQty ? 'El usuario en realidad necesitaba '+actualQty+'.' : ''}
+Esta regla acaba de fallar miserablemente. El usuario metió ${triggerQty} de "${rule.triggerKeyword}", la IA sugirió ${suggestedQty} de "${rule.targetKeyword}", pero el usuario la rechazó. ${actualQty ? 'El usuario en realidad necesitaba ' + actualQty + '.' : ''}
 ${userReason ? 'El usuario te dejó este mensaje explicando tu error: "' + userReason + '". Ajusta tu lógica matemática basándote en esta explicación humana.' : ''}
 
 Re-escribe la fórmula matemática en un código JavaScript limpio y puro (SIN bloques markdown de código, SIN la palabra javascript, SOLO la línea de código).
@@ -2931,7 +2931,7 @@ Ejemplo de formato estricto esperado: return Math.max(1, Math.ceil(triggerQty / 
                     const result = await model.generateContent(prompt);
                     let newCode = result.response.text().trim();
                     newCode = newCode.replace(/```javascript/g, '').replace(/```js/g, '').replace(/```/g, '').trim();
-                    
+
                     const oldCode = rule.codeFormula;
                     rule.codeFormula = newCode;
                     rule.successCount = 0;
@@ -2950,8 +2950,8 @@ Ejemplo de formato estricto esperado: return Math.max(1, Math.ceil(triggerQty / 
                 } catch (geminiErr) {
                     console.error("Gemini Error:", geminiErr);
                     // Fallback matemático básico
-                    let ratio = actualQty ? (actualQty/triggerQty).toFixed(2) : (Math.random() * 2).toFixed(2);
-                    if (ratio == 0 || ratio == "0.00") ratio = 0.5; 
+                    let ratio = actualQty ? (actualQty / triggerQty).toFixed(2) : (Math.random() * 2).toFixed(2);
+                    if (ratio == 0 || ratio == "0.00") ratio = 0.5;
                     rule.codeFormula = `return Math.max(1, Math.round(triggerQty * ${ratio}));`;
                     rule.successCount = 0;
                     rule.failCount = 0;
@@ -2970,14 +2970,14 @@ app.get('/api/ai/logs', async (req, res) => {
     try {
         const logs = await AiLog.find().sort({ timestamp: -1 }).limit(50);
         res.json(logs);
-    } catch(e) { res.status(500).json({error: 'Error'}); }
+    } catch (e) { res.status(500).json({ error: 'Error' }); }
 });
 
 app.get('/api/ai/rules', async (req, res) => {
     try {
         const rules = await AiRule.find().sort({ triggerKeyword: 1 });
         res.json(rules);
-    } catch(e) { res.status(500).json({error: 'Error'}); }
+    } catch (e) { res.status(500).json({ error: 'Error' }); }
 });
 
 app.post('/api/ai/bootstrap', async (req, res) => {
@@ -2985,7 +2985,7 @@ app.post('/api/ai/bootstrap', async (req, res) => {
         addLogLine('AI-BOOTSTRAP', 'Iniciando escaneo global del inventario con Gemini...');
         const items = await mongoose.model('InventoryItem').find({});
         const itemNames = items.map(i => i.nombre);
-        
+
         const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
         const prompt = `
 Eres un experto en inventarios de TI, telecomunicaciones y redes.
@@ -3009,7 +3009,7 @@ Retorna ÚNICAMENTE un arreglo JSON válido, sin explicaciones, sin markdown de 
         } else {
             rawResponse = rawResponse.replace(/^```json\s*/g, '').replace(/^```\s*/g, '').replace(/```\s*$/g, '').trim();
         }
-        
+
         let newRules;
         try {
             newRules = JSON.parse(rawResponse);
@@ -3017,7 +3017,7 @@ Retorna ÚNICAMENTE un arreglo JSON válido, sin explicaciones, sin markdown de 
             console.error("JSON Parse Error. Raw Gemini Response:", rawResponse);
             throw new Error("Gemini did not return valid JSON");
         }
-        
+
         if (Array.isArray(newRules)) {
             for (let r of newRules) {
                 const exists = await AiRule.findOne({ triggerKeyword: r.triggerKeyword, targetKeyword: r.targetKeyword });
@@ -3032,18 +3032,18 @@ Retorna ÚNICAMENTE un arreglo JSON válido, sin explicaciones, sin markdown de 
                 }
             }
         }
-        
+
         await AiLog.create({
             eventType: 'BOOTSTRAP',
             details: 'Escaneo global de inventario completado',
             prompt: prompt,
             response: rawResponse
         });
-        
+
         res.json({ success: true, count: newRules.length });
-    } catch(e) {
+    } catch (e) {
         console.error(e);
-        res.status(500).json({error: 'Error en Bootstrap'});
+        res.status(500).json({ error: 'Error en Bootstrap' });
     }
 });
 
@@ -3112,7 +3112,7 @@ app.post('/api/inventory/transaction', async (req, res) => {
             const tx = new InventoryTransaction(txParams);
             await tx.save();
         }
-        
+
         if (tipoMovimiento === 'Salida') {
             notifyUserByName(responsable, {
                 title: "Asignación de Inventario",
@@ -3138,24 +3138,26 @@ app.post('/api/inventory/transaction', async (req, res) => {
 app.get('/api/assignments/pending/:userId', async (req, res) => {
     try {
         const user = await User.findById(req.params.userId);
-        if (!user) return res.status(404).json({error: 'No user'});
+        if (!user) return res.status(404).json({ error: 'No user' });
         const fullName = `${user.nombre} ${user.apellido}`;
-        
-        const pendingInventory = await InventoryTransaction.find({ 
-            responsable: { $in: [
-                fullName,
-                user.nombre,
-                `${user.nombre} undefined`,
-                `${user.nombre} `.trim()
-            ] }, 
-            estadoConfirmacion: 'Pendiente' 
+
+        const pendingInventory = await InventoryTransaction.find({
+            responsable: {
+                $in: [
+                    fullName,
+                    user.nombre,
+                    `${user.nombre} undefined`,
+                    `${user.nombre} `.trim()
+                ]
+            },
+            estadoConfirmacion: 'Pendiente'
         }).populate('itemId');
-        
-        const pendingVehicles = await VehicleTransaction.find({ 
-            userId: req.params.userId, 
-            estadoConfirmacion: 'Pendiente' 
+
+        const pendingVehicles = await VehicleTransaction.find({
+            userId: req.params.userId,
+            estadoConfirmacion: 'Pendiente'
         }).populate('vehicleId');
-        
+
         res.json({ inventory: pendingInventory, vehicles: pendingVehicles });
     } catch (e) {
         res.status(500).json({ error: 'Error fetching assignments' });
@@ -3166,10 +3168,10 @@ app.put('/api/assignments/:type/:id/confirm', async (req, res) => {
     try {
         const { firma } = req.body;
         if (!firma) return res.status(400).json({ error: 'Firma requerida' });
-        
+
         if (req.params.type === 'inventory') {
             const tx = await InventoryTransaction.findById(req.params.id);
-            if (!tx) return res.status(404).json({error: 'Tx no encontrada'});
+            if (!tx) return res.status(404).json({ error: 'Tx no encontrada' });
             tx.estadoConfirmacion = 'Confirmado';
             tx.firma = firma;
             await tx.save();
@@ -3177,11 +3179,11 @@ app.put('/api/assignments/:type/:id/confirm', async (req, res) => {
             res.json({ success: true });
         } else if (req.params.type === 'vehicle') {
             const tx = await VehicleTransaction.findById(req.params.id);
-            if (!tx) return res.status(404).json({error: 'Tx no encontrada'});
+            if (!tx) return res.status(404).json({ error: 'Tx no encontrada' });
             tx.estadoConfirmacion = 'Confirmado';
             tx.firmaUsuario = firma;
             await tx.save();
-            
+
             const v = await Vehicle.findById(tx.vehicleId);
             if (v) {
                 v.estado = 'Prestado';
@@ -3192,7 +3194,7 @@ app.put('/api/assignments/:type/:id/confirm', async (req, res) => {
         } else {
             res.status(400).json({ error: 'Type invalid' });
         }
-    } catch(e) {
+    } catch (e) {
         res.status(500).json({ error: 'Error confirming assignment' });
     }
 });
@@ -3201,28 +3203,28 @@ app.put('/api/assignments/:type/:id/reject', async (req, res) => {
     try {
         if (req.params.type === 'inventory') {
             const tx = await InventoryTransaction.findById(req.params.id);
-            if (!tx) return res.status(404).json({error: 'Tx no encontrada'});
-            
+            if (!tx) return res.status(404).json({ error: 'Tx no encontrada' });
+
             const item = await InventoryItem.findById(tx.itemId);
             if (item && tx.tipoMovimiento === 'Salida') {
                 item.cantidadEnStock += tx.cantidad;
                 await item.save();
                 io.emit('update_inventory_item', { ...item.toObject(), id: item._id.toString() });
             }
-            
+
             tx.estadoConfirmacion = 'Rechazado';
             await tx.save();
             io.emit('inventory_transactions_updated', { responsable: tx.responsable });
-            
+
             notifyAdmins({ title: "Asignación Rechazada", body: `${tx.responsable} rechazó la asignación de ${item ? item.nombre : 'un ítem'}.` });
             res.json({ success: true });
         } else if (req.params.type === 'vehicle') {
             const tx = await VehicleTransaction.findById(req.params.id);
-            if (!tx) return res.status(404).json({error: 'Tx no encontrada'});
-            
+            if (!tx) return res.status(404).json({ error: 'Tx no encontrada' });
+
             tx.estadoConfirmacion = 'Rechazado';
             await tx.save();
-            
+
             const v = await Vehicle.findById(tx.vehicleId);
             if (v) {
                 v.estado = 'Disponible';
@@ -3236,7 +3238,7 @@ app.put('/api/assignments/:type/:id/reject', async (req, res) => {
         } else {
             res.status(400).json({ error: 'Type invalid' });
         }
-    } catch(e) {
+    } catch (e) {
         res.status(500).json({ error: 'Error rejecting assignment' });
     }
 });
@@ -3249,7 +3251,7 @@ app.get('/api/inventory/transactions/history', async (req, res) => {
         const transactions = await InventoryTransaction.find({ fecha: { $gte: sixMonthsAgo } })
             .sort({ fecha: -1 })
             .populate('itemId', 'nombre numeroParte tipo');
-            
+
         res.json(transactions);
     } catch (e) {
         console.error("Error historial global:", e);
@@ -3339,7 +3341,7 @@ app.post('/api/zk-checkin', async (req, res) => {
             foto: fingerprintSvg,
             timestamp: checkinDate
         });
-        
+
         await newCheckIn.save();
 
         // Emit socket to UI
@@ -3361,10 +3363,10 @@ app.post('/api/register-face', async (req, res) => {
         if (!targetUserId || !faceDescriptor || faceDescriptor.length === 0) {
             return res.status(400).json({ error: 'Datos insuficientes.' });
         }
-        
+
         const user = await User.findById(targetUserId);
         if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
-        
+
         user.faceDescriptor = faceDescriptor;
         await user.save();
         res.json({ message: 'Rostro registrado con éxito' });
@@ -3407,10 +3409,10 @@ app.post('/api/face-checkin', async (req, res) => {
             foto: faceSvg,
             timestamp: new Date()
         });
-        
+
         await newCheckIn.save();
         io.emit('new_checkin', newCheckIn);
-        
+
         res.status(201).json({ message: 'Asistencia registrada correctamente.', checkIn: newCheckIn, user: user });
     } catch (e) {
         console.error('Error procesando Face CheckIn:', e);
@@ -3431,9 +3433,9 @@ app.post('/api/helprequests', async (req, res) => {
             targetDate
         });
         await newReq.save();
-        
+
         io.emit('new_help_request', newReq);
-        
+
         const subs = await PushSubscription.find({ userId: assignedToId });
         const payload = {
             title: "Nueva Solicitud de Apoyo",
@@ -3465,9 +3467,9 @@ app.put('/api/helprequests/:id', async (req, res) => {
     try {
         const updated = await HelpRequest.findByIdAndUpdate(req.params.id, { status: req.body.status }, { returnDocument: 'after' });
         if (!updated) return res.status(404).json({ error: 'No encontrado' });
-        
+
         io.emit('update_help_request', updated);
-        
+
         const targetUserId = req.body.status === 'resuelto' ? updated.requesterId : updated.requesterId;
         const subs = await PushSubscription.find({ userId: targetUserId });
         const payload = {
@@ -3478,9 +3480,9 @@ app.put('/api/helprequests/:id', async (req, res) => {
         for (const sub of subs) {
             await sendPushNotification(sub.subscription, payload);
         }
-        
+
         res.json(updated);
-    } catch(e) {
+    } catch (e) {
         res.status(500).json({ error: 'Error actualizando solicitud' });
     }
 });
@@ -3517,19 +3519,19 @@ async function runCronRoutine() {
     try {
         const now = new Date();
         const mxTimeStr = now.toLocaleString('en-US', { timeZone: 'America/Mexico_City', hour12: false, hour: '2-digit', minute: '2-digit' });
-        
+
         // Ejecutar a las 08:00 AM CDMX o al ser invocado manualmente
         const today = new Date(now.toLocaleString('en-US', { timeZone: 'America/Mexico_City' }));
-        
+
         const getStr = (d) => {
             const y = d.getFullYear();
             const m = String(d.getMonth() + 1).padStart(2, '0');
             const dd = String(d.getDate()).padStart(2, '0');
             return `${y}-${m}-${dd}`;
         };
-        
+
         const todayStr = getStr(today);
-        
+
         const inTwoDays = new Date(today);
         inTwoDays.setDate(today.getDate() + 2);
         const inTwoDaysStr = getStr(inTwoDays);
@@ -3539,7 +3541,7 @@ async function runCronRoutine() {
             const reason = isHoliday(todayStr);
             const title = "¡Día de Descanso!";
             const body = `Hoy es un día de descanso oficial: ${reason}. ¡Disfruta tu día!`;
-            
+
             await notifyAll({ title, body }).catch(e => console.error("Error push:", e));
             sentHolidayNotifications[`today_${todayStr}`] = true;
             console.log(`[Cron] Notificación de feriado enviada para hoy: ${todayStr}`);
@@ -3550,7 +3552,7 @@ async function runCronRoutine() {
             const reason = isHoliday(inTwoDaysStr);
             const title = "¡Próximo Descanso!";
             const body = `Prepárate: El ${inTwoDaysStr} será de descanso oficial por: ${reason}.`;
-            
+
             await notifyAll({ title, body }).catch(e => console.error("Error push:", e));
             sentHolidayNotifications[`prep_${inTwoDaysStr}`] = true;
             console.log(`[Cron] Notificación preventiva enviada para el feriado: ${inTwoDaysStr}`);
