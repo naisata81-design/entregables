@@ -6,6 +6,11 @@ const mongoose = require('mongoose');
 const http = require('http');
 const { Server } = require('socket.io');
 const webpush = require('web-push');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
+
+// Configuración Gemini (Para auto-programación de IA)
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.api_gemini || 'AIzaSyAx0uBoLQm1REE9uLmty--v7FJap7OT0zI';
+const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 
 // Configuración Web Push (VAPID)
 const VAPID_PUBLIC_KEY = 'BJvKenaUsLTNY_QxgZy1Md3kIiRVNCS05ql5F5mrdgPYZY5A9xyYeeuraXFGrNnVtvG--hFJLM0qWKKUdmboYEU';
@@ -150,6 +155,19 @@ const AvisoSchema = new mongoose.Schema({
     requiereActualizacion: { type: Boolean, default: false }
 }, { timestamps: true });
 const Aviso = mongoose.model('Aviso', AvisoSchema);
+
+// --- AI Evolutiva (El Cerebro) ---
+const AiRuleSchema = new mongoose.Schema({
+    triggerKeyword: String, // ej. "CABLE UTP"
+    targetKeyword: String, // ej. "TUBO CONDUIT"
+    confidence: { type: Number, default: 0.5 }, // Confianza (0.0 a 1.0)
+    codeFormula: { type: String, default: "return triggerQty;" }, // Fórmula JS evaluable
+    successCount: { type: Number, default: 0 },
+    failCount: { type: Number, default: 0 },
+    lastEvolvedAt: { type: Date, default: Date.now },
+    isActive: { type: Boolean, default: true }
+});
+const AiRule = mongoose.model('AiRule', AiRuleSchema);
 
 const NotificationSchema = new mongoose.Schema({
     userId: { type: String, required: true }, // Puede ser el ID de usuario o los strings especiales 'all', 'admins'
@@ -2782,6 +2800,96 @@ app.post('/api/inventory/:id/repair', async (req, res) => {
     } catch (e) {
         console.error("Error reparando falla", e);
         res.status(500).json({ error: 'Error marcando como reparada.' });
+    }
+});
+
+// --- NAISA AI (El Cerebro) Endpoints ---
+app.post('/api/ai/suggest', async (req, res) => {
+    try {
+        const { cartItems } = req.body; 
+        if (!cartItems || cartItems.length === 0) return res.json({ suggestions: [] });
+        
+        const suggestions = [];
+        const activeRules = await AiRule.find({ isActive: true });
+        
+        for (const item of cartItems) {
+            const rule = activeRules.find(r => item.itemName.toUpperCase().includes(r.triggerKeyword.toUpperCase()));
+            if (rule) {
+                if (cartItems.some(c => c.itemName.toUpperCase().includes(rule.targetKeyword.toUpperCase()))) continue;
+                try {
+                    const calcFunc = new Function('triggerQty', rule.codeFormula);
+                    const suggestedQty = Math.round(calcFunc(item.qty));
+                    if (suggestedQty > 0) {
+                        suggestions.push({
+                            trigger: item.itemName,
+                            target: rule.targetKeyword,
+                            qty: suggestedQty,
+                            confidence: rule.confidence,
+                            ruleId: rule._id
+                        });
+                    }
+                } catch(e) { console.error("Error evaluando AI Rule:", e); }
+            }
+        }
+        res.json({ suggestions });
+    } catch (e) {
+        res.status(500).json({ error: 'AI Error' });
+    }
+});
+
+app.post('/api/ai/feedback', async (req, res) => {
+    try {
+        const { ruleId, accepted, triggerQty, suggestedQty, actualQty } = req.body;
+        const rule = await AiRule.findById(ruleId);
+        if (!rule) return res.status(404).json({ error: 'Rule not found' });
+        
+        if (accepted) {
+            rule.successCount += 1;
+            rule.confidence = Math.min(0.99, rule.confidence + 0.05);
+        } else {
+            rule.failCount += 1;
+            rule.confidence = Math.max(0.1, rule.confidence - 0.05);
+            
+            if (rule.failCount > rule.successCount * 2 && rule.failCount > 3) {
+                addLogLine('AI-EVOLVE', `Regla para ${rule.targetKeyword} mutando código usando Gemini...`);
+                try {
+                    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+                    const prompt = `
+Eres el motor evolutivo de programación de una Inteligencia Artificial.
+Tu objetivo es arreglar la fórmula matemática en código JavaScript.
+La regla actual para calcular cuántas unidades de "${rule.targetKeyword}" se necesitan basándose en la cantidad de "${rule.triggerKeyword}" es:
+${rule.codeFormula}
+
+Esta regla acaba de fallar miserablemente. El usuario metió ${triggerQty} de "${rule.triggerKeyword}", la IA sugirió ${suggestedQty} de "${rule.targetKeyword}", pero el usuario la rechazó. ${actualQty ? 'El usuario en realidad necesitaba '+actualQty : ''}
+Re-escribe la fórmula matemática en un código JavaScript limpio y puro (SIN bloques markdown de código, SIN la palabra javascript, SOLO la línea de código).
+Debe tomar la variable global 'triggerQty' y retornar la cantidad numérica sugerida utilizando Math.
+Ejemplo de formato estricto esperado: return Math.max(1, Math.ceil(triggerQty / 3));
+`;
+                    const result = await model.generateContent(prompt);
+                    let newCode = result.response.text().trim();
+                    newCode = newCode.replace(/```javascript/g, '').replace(/```js/g, '').replace(/```/g, '').trim();
+                    
+                    rule.codeFormula = newCode;
+                    rule.successCount = 0;
+                    rule.failCount = 0;
+                    rule.lastEvolvedAt = new Date();
+                    addLogLine('AI-EVOLVE', `Gemini programó nueva fórmula: ${newCode}`);
+                } catch (geminiErr) {
+                    console.error("Gemini Error:", geminiErr);
+                    // Fallback matemático básico
+                    let ratio = actualQty ? (actualQty/triggerQty).toFixed(2) : (Math.random() * 2).toFixed(2);
+                    if (ratio == 0 || ratio == "0.00") ratio = 0.5; 
+                    rule.codeFormula = `return Math.max(1, Math.round(triggerQty * ${ratio}));`;
+                    rule.successCount = 0;
+                    rule.failCount = 0;
+                    rule.lastEvolvedAt = new Date();
+                }
+            }
+        }
+        await rule.save();
+        res.json({ success: true, rule });
+    } catch (e) {
+        res.status(500).json({ error: 'AI Error' });
     }
 });
 
