@@ -3499,7 +3499,7 @@ app.get('/api/keep-alive', async (req, res) => {
             console.log('[Keep-Alive] Ping recibido (Sin IA configurada).');
             return res.json({ status: 'ok', message: 'Ping básico' });
         }
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
         const prompt = "Escribe un dato curioso muy corto (máx 15 palabras) sobre programación, servidores o tecnología.";
         const result = await model.generateContent(prompt);
         const text = result.response.text().trim();
