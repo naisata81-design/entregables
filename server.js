@@ -358,6 +358,7 @@ const VehicleSchema = new mongoose.Schema({
     placas: { type: String, required: true, unique: true },
     estado: { type: String, enum: ['Disponible', 'Prestado', 'Mantenimiento', 'Pendiente de Confirmación'], default: 'Disponible' },
     bitacoraEsperada: { type: [String], default: ['Gato', 'Refacción', 'Cables auxiliares', 'Extintor'] },
+    equipmentPhotos: { type: [String], default: [] },
     lastDamageReport: { type: String, default: '' },
     currentUserId: { type: String, default: null },
     currentUserName: { type: String, default: null }
@@ -667,8 +668,8 @@ async function notifyUserByName(fullName, payload) {
 
 // CORS Update para permitir solicitudes desde el front hospedado en otro sitio
 app.use(cors({ origin: '*' }));
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ limit: '50mb', extended: true }));
+app.use(express.json({ limit: '100mb' }));
+app.use(express.urlencoded({ limit: '100mb', extended: true }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads'))); // Exponer la carpeta de subidas en la raíz
 
 // --- Advanced IT Suite ---
@@ -1566,10 +1567,10 @@ app.get('/api/vehicles/:id/last-loan', async (req, res) => {
 
 app.post('/api/vehicles', async (req, res) => {
     try {
-        const { marca, modelo, color, placas, bitacoraEsperada } = req.body;
+        const { marca, modelo, color, placas, bitacoraEsperada, equipmentPhotos } = req.body;
         if (!marca || !modelo || !placas) return res.status(400).json({ error: 'Marca, modelo y placas son obligatorios.' });
 
-        const newVehicle = new Vehicle({ marca, modelo, color, placas, bitacoraEsperada });
+        const newVehicle = new Vehicle({ marca, modelo, color, placas, bitacoraEsperada, equipmentPhotos });
         await newVehicle.save();
         res.status(201).json(newVehicle);
     } catch (e) {
