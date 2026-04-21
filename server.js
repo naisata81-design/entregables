@@ -3542,34 +3542,7 @@ Responde en formato claro, nombrando el archivo, línea, el motivo del fallo y l
     }
 });
 
-// --- Keep-Alive con IA (Para evitar que Render se duerma) ---
-app.get('/api/keep-alive', async (req, res) => {
-    try {
-        if (!genAI) {
-            console.log('[Keep-Alive] Ping recibido (Sin IA configurada).');
-            return res.json({ status: 'ok', message: 'Ping básico' });
-        }
-        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
-        const prompt = "Escribe un dato curioso muy corto (máx 15 palabras) sobre programación, servidores o tecnología.";
-        const result = await model.generateContent(prompt);
-        const text = result.response.text().trim();
-        
-        console.log(`[Keep-Alive IA] Servidor activo. Dato: ${text}`);
-        res.json({ status: 'ok', ai_message: text });
-    } catch (e) {
-        console.error('[Keep-Alive] Error contactando a Gemini:', e.message);
-        res.json({ status: 'ok', error: 'IA no disponible' });
-    }
-});
 
-// Autoejecutar ping cada 13 minutos (780000 ms) para mantener el servicio despierto
-setInterval(() => {
-    const url = process.env.RENDER_EXTERNAL_URL 
-        ? `${process.env.RENDER_EXTERNAL_URL}/api/keep-alive` 
-        : `http://localhost:${PORT}/api/keep-alive`;
-    
-    fetch(url).catch(e => console.error('[Keep-Alive] Error en auto-ping:', e.message));
-}, 13 * 60 * 1000);
 
 server.listen(PORT, '0.0.0.0', () => {
     console.log(`Servidor API ejecutándose en el puerto ${PORT}`);
