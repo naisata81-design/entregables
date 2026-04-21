@@ -3491,6 +3491,56 @@ app.put('/api/helprequests/:id', async (req, res) => {
         res.status(500).json({ error: 'Error actualizando solicitud' });
     }
 });
+// --- Telemetry & AI Diagnose ---
+app.post('/api/telemetry/error', (req, res) => {
+    const errorData = req.body;
+    addLogLine('TELEMETRY-ERROR', `Client Error: ${errorData.message} at ${errorData.source}:${errorData.lineno}:${errorData.colno}`);
+    if (errorData.stack) {
+        addLogLine('TELEMETRY-STACK', errorData.stack);
+    }
+    res.status(200).json({ success: true });
+});
+
+app.get('/api/ai/diagnose', async (req, res) => {
+    try {
+        const fs = require('fs');
+        const path = require('path');
+        
+        const filesToRead = ['server.js', 'public/app.js', 'public/learn.html', 'public/tracking.js'];
+        let codebaseContext = '';
+        for (const file of filesToRead) {
+            try {
+                const content = fs.readFileSync(path.join(__dirname, file), 'utf8');
+                codebaseContext += `\n\n--- FILE: ${file} ---\n${content}\n`;
+            } catch (err) {
+                codebaseContext += `\n\n--- FILE: ${file} ---\n(Could not read file)\n`;
+            }
+        }
+
+        const recentLogs = serverLogs.join('\n');
+
+        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+        const prompt = `Aquí tienes el código fuente de mi plataforma y los registros recientes del servidor (incluyendo errores de telemetría de la PWA capturados en TELEMETRY-ERROR).
+Busca los errores reportados en los registros, ve a la línea exacta en el código proporcionado, explícame por qué falló y dame el bloque de código corregido.
+
+--- RECENT LOGS ---
+${recentLogs}
+
+--- CODEBASE CONTEXT ---
+${codebaseContext}
+
+Responde en formato claro, nombrando el archivo, línea, el motivo del fallo y la solución en código. Usa Markdown.`;
+
+        const result = await model.generateContent(prompt);
+        const diagnosis = result.response.text();
+        
+        addLogLine('AI-DIAGNOSE', 'Diagnostic requested and generated successfully.');
+        res.json({ success: true, diagnosis });
+    } catch (e) {
+        console.error('Error generating AI diagnosis:', e);
+        res.status(500).json({ error: 'Error generating diagnosis.' });
+    }
+});
 
 // --- Keep-Alive con IA (Para evitar que Render se duerma) ---
 app.get('/api/keep-alive', async (req, res) => {
