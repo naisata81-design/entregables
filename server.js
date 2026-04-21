@@ -1628,6 +1628,8 @@ app.post('/api/vehicles/:id/loan', async (req, res) => {
                 body: `Se te ha asignado un vehículo. Por favor, abre la app para firmar de conformidad.`
             });
         }
+        
+        io.emit('vehicle_updated', vehicle);
 
         res.status(200).json({ message: 'Vehículo en proceso de asignación (Firma pendiente).', transaction: tx });
     } catch (e) {
@@ -1667,6 +1669,8 @@ app.post('/api/vehicles/:id/return', async (req, res) => {
                 body: `Tu devolución del vehículo ${vehicle.marca} ha sido confirmada en almacén.`
             });
         }
+        
+        io.emit('vehicle_updated', vehicle);
 
         res.status(200).json({ message: 'Vehículo devuelto exitosamente.', transaction: tx });
     } catch (e) {
