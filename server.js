@@ -86,7 +86,14 @@ const UserSchema = new mongoose.Schema({
     evidenciaTerminos: { type: String, default: '' },
     estadoCuenta: { type: String, enum: ['pendiente', 'activa', 'rechazada'] },
     numeroEmpleado: { type: Number, unique: true, sparse: true },
-    faceDescriptor: { type: [Number], default: [] }
+    faceDescriptor: { type: [Number], default: [] },
+    rfc: { type: String, default: '' },
+    nss: { type: String, default: '' },
+    documentos: [{
+        nombre: String,
+        url: String,
+        fecha: { type: Date, default: Date.now }
+    }]
 }, { timestamps: true });
 const User = mongoose.model('User', UserSchema);
 
@@ -1185,6 +1192,26 @@ app.put('/api/users/:id/accept-terms', async (req, res) => {
         res.json({ message: 'Términos aceptados correctamente.', user });
     } catch (e) {
         res.status(500).json({ error: 'Error aceptando términos legales.' });
+    }
+});
+
+// Actualizar Perfil Extendido (RFC, NSS, Documentos)
+app.put('/api/users/:id/profile-extended', async (req, res) => {
+    try {
+        const user = await User.findById(req.params.id);
+        if (!user) return res.status(404).json({ error: 'User not found' });
+        
+        const { rfc, nss, newDocument } = req.body;
+        if (rfc !== undefined) user.rfc = rfc;
+        if (nss !== undefined) user.nss = nss;
+        if (newDocument) {
+            user.documentos.push(newDocument);
+        }
+        
+        await user.save();
+        res.json({ success: true, user });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
     }
 });
 
@@ -3542,7 +3569,25 @@ Responde en formato claro, nombrando el archivo, línea, el motivo del fallo y l
     }
 });
 
-
+// --- Keep-Alive con IA (Para evitar que Render se duerma) ---
+app.get('/api/keep-alive', async (req, res) => {
+    try {
+        if (!genAI) {
+            console.log('[Keep-Alive] Ping recibido (Sin IA configurada).');
+            return res.json({ status: 'ok', message: 'Ping básico' });
+        }
+        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+        const prompt = "Escribe un dato curioso muy corto (máx 15 palabras) sobre programación, servidores o tecnología.";
+        const result = await model.generateContent(prompt);
+        const text = result.response.text().trim();
+        
+        console.log(`[Keep-Alive IA] Servidor activo. Dato: ${text}`);
+        res.json({ status: 'ok', ai_message: text });
+    } catch (e) {
+        console.error('[Keep-Alive] Error contactando a Gemini:', e.message);
+        res.json({ status: 'ok', error: 'IA no disponible' });
+    }
+});
 
 server.listen(PORT, '0.0.0.0', () => {
     console.log(`Servidor API ejecutándose en el puerto ${PORT}`);
