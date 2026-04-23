@@ -1200,14 +1200,14 @@ app.put('/api/users/:id/profile-extended', async (req, res) => {
     try {
         const user = await User.findById(req.params.id);
         if (!user) return res.status(404).json({ error: 'User not found' });
-        
+
         const { rfc, nss, newDocument } = req.body;
         if (rfc !== undefined) user.rfc = rfc;
         if (nss !== undefined) user.nss = nss;
         if (newDocument) {
             user.documentos.push(newDocument);
         }
-        
+
         await user.save();
         res.json({ success: true, user });
     } catch (e) {
@@ -1655,7 +1655,7 @@ app.post('/api/vehicles/:id/loan', async (req, res) => {
                 body: `Se te ha asignado un vehículo. Por favor, abre la app para firmar de conformidad.`
             });
         }
-        
+
         io.emit('vehicle_updated', vehicle);
 
         res.status(200).json({ message: 'Vehículo en proceso de asignación (Firma pendiente).', transaction: tx });
@@ -1696,7 +1696,7 @@ app.post('/api/vehicles/:id/return', async (req, res) => {
                 body: `Tu devolución del vehículo ${vehicle.marca} ha sido confirmada en almacén.`
             });
         }
-        
+
         io.emit('vehicle_updated', vehicle);
 
         res.status(200).json({ message: 'Vehículo devuelto exitosamente.', transaction: tx });
@@ -3532,7 +3532,7 @@ app.get('/api/ai/diagnose', async (req, res) => {
     try {
         const fs = require('fs');
         const path = require('path');
-        
+
         const filesToRead = ['server.js', 'public/app.js', 'public/learn.html', 'public/tracking.js'];
         let codebaseContext = '';
         for (const file of filesToRead) {
@@ -3560,7 +3560,7 @@ Responde en formato claro, nombrando el archivo, línea, el motivo del fallo y l
 
         const result = await model.generateContent(prompt);
         const diagnosis = result.response.text();
-        
+
         addLogLine('AI-DIAGNOSE', 'Diagnostic requested and generated successfully.');
         res.json({ success: true, diagnosis });
     } catch (e) {
@@ -3580,12 +3580,71 @@ app.get('/api/keep-alive', async (req, res) => {
         const prompt = "Escribe un dato curioso muy corto (máx 15 palabras) sobre programación, servidores o tecnología.";
         const result = await model.generateContent(prompt);
         const text = result.response.text().trim();
-        
+
         console.log(`[Keep-Alive IA] Servidor activo. Dato: ${text}`);
         res.json({ status: 'ok', ai_message: text });
     } catch (e) {
         console.error('[Keep-Alive] Error contactando a Gemini:', e.message);
         res.json({ status: 'ok', error: 'IA no disponible' });
+    }
+});
+
+
+// --- SYSCOM API INTEGRATION ---
+let syscomToken = null;
+let syscomTokenExpiry = 0;
+
+async function getSyscomToken() {
+    if (syscomToken && Date.now() < syscomTokenExpiry) {
+        return syscomToken;
+    }
+    
+    const clientId = process.env.SYSCOM_CLIENT_ID;
+    const clientSecret = process.env.SYSCOM_CLIENT_SECRET;
+    
+    if (!clientId || !clientSecret) {
+        throw new Error("Syscom credentials not configured in environment.");
+    }
+    
+    const params = new URLSearchParams();
+    params.append('client_id', clientId);
+    params.append('client_secret', clientSecret);
+    params.append('grant_type', 'client_credentials');
+    
+    const response = await fetch('https://developers.syscom.mx/oauth/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: params
+    });
+    
+    if (!response.ok) {
+        throw new Error("Failed to obtain Syscom Token");
+    }
+    
+    const data = await response.json();
+    syscomToken = data.access_token;
+    // Expira en data.expires_in segundos. Restamos 60s por seguridad.
+    syscomTokenExpiry = Date.now() + ((data.expires_in - 60) * 1000);
+    return syscomToken;
+}
+
+app.get('/api/syscom/search', async (req, res) => {
+    try {
+        const { q } = req.query;
+        if (!q) return res.status(400).json({ error: 'Falta término de búsqueda' });
+        
+        const token = await getSyscomToken();
+        const response = await fetch(`https://developers.syscom.mx/api/v1/productos?busqueda=${encodeURIComponent(q)}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        if (!response.ok) throw new Error("Error consultando Syscom API");
+        const data = await response.json();
+        
+        res.json(data);
+    } catch (e) {
+        console.error("Syscom Error:", e.message);
+        res.status(500).json({ error: 'Error conectando con Syscom' });
     }
 });
 
