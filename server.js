@@ -3614,11 +3614,13 @@ async function getSyscomToken() {
     const response = await fetch('https://developers.syscom.mx/oauth/token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: params
+        body: params.toString()
     });
     
     if (!response.ok) {
-        throw new Error("Failed to obtain Syscom Token");
+        const errorText = await response.text();
+        console.error("Syscom OAuth Error:", errorText);
+        throw new Error("Failed to obtain Syscom Token: " + errorText);
     }
     
     const data = await response.json();
