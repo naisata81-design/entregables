@@ -3300,6 +3300,26 @@ app.get('/api/inventory/:id/transactions', async (req, res) => {
     }
 });
 
+app.get('/api/inventory/all-active-loans', async (req, res) => {
+    try {
+        const transactions = await InventoryTransaction.find().populate('itemId', 'nombre');
+        const countMap = {};
+        for (const t of transactions) {
+            if (t.itemId) {
+                const idStr = t.itemId._id.toString();
+                if (!countMap[idStr]) countMap[idStr] = 0;
+                if (t.tipoMovimiento === 'Salida') countMap[idStr] += t.cantidad;
+                else if (t.tipoMovimiento === 'Devolucion') countMap[idStr] -= t.cantidad;
+            }
+        }
+        const lentOutItemIds = Object.keys(countMap).filter(id => countMap[id] > 0);
+        res.json(lentOutItemIds);
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ error: 'Error fetching all active loans' });
+    }
+});
+
 app.get('/api/inventory/loans/:responsable', async (req, res) => {
     try {
         const { responsable } = req.params;
