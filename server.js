@@ -3302,7 +3302,7 @@ app.get('/api/inventory/:id/transactions', async (req, res) => {
 
 app.get('/api/inventory/all-active-loans', async (req, res) => {
     try {
-        const transactions = await InventoryTransaction.find().populate('itemId', 'nombre');
+        const transactions = await InventoryTransaction.find({ estadoConfirmacion: { $ne: 'Rechazado' } }).populate('itemId', 'nombre');
         const countMap = {};
         for (const t of transactions) {
             if (t.itemId) {
