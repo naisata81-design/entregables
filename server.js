@@ -1839,7 +1839,7 @@ app.get('/api/users/:id/vehicles', async (req, res) => {
         const txs = await VehicleTransaction.find({
             userId: req.params.id,
             fecha: { $gte: oneYearAgo }
-        }).select('-firma -firmaUsuario').sort({ fecha: -1 }).populate('vehicleId');
+        }).select('-firma -firmaUsuario -gasolinaFoto -imgReporteDanos -checklistNotas').sort({ fecha: -1 }).populate('vehicleId', 'marca modelo placas');
 
         // Uso de la nueva propiedad global del vehículo para evitar bucles visuales:
         const currentVehicles = await Vehicle.find({ currentUserId: req.params.id });
@@ -1861,11 +1861,21 @@ app.get('/api/vehicles/:id/history', async (req, res) => {
         const txs = await VehicleTransaction.find({
             vehicleId: req.params.id,
             fecha: { $gte: oneYearAgo }
-        }).select('-firma -firmaUsuario').sort({ fecha: -1 }).populate('vehicleId');
+        }).select('-firma -firmaUsuario -gasolinaFoto -imgReporteDanos -checklistNotas').sort({ fecha: -1 }).populate('vehicleId', 'marca modelo placas');
 
         res.json({ history: txs });
     } catch (e) {
         res.status(500).json({ error: 'Error obteniendo historial del vehículo.' });
+    }
+});
+
+app.get('/api/vehicle-transaction/:id/photos', async (req, res) => {
+    try {
+        const tx = await VehicleTransaction.findById(req.params.id).select('gasolinaFoto imgReporteDanos');
+        if (!tx) return res.status(404).json({ error: 'Transacción no encontrada' });
+        res.json({ gasolinaFoto: tx.gasolinaFoto, imgReporteDanos: tx.imgReporteDanos });
+    } catch (e) {
+        res.status(500).json({ error: 'Error obteniendo fotos de transacción.' });
     }
 });
 
@@ -2487,6 +2497,11 @@ app.get('/api/employee-of-the-week', async (req, res) => {
                     winner = stat;
                 }
             }
+        }
+
+        if (winner && winner._id) {
+            const winnerFull = await User.findById(winner._id).select('fotoPerfil');
+            if (winnerFull) winner.fotoPerfil = winnerFull.fotoPerfil;
         }
 
         res.json({ winner });
