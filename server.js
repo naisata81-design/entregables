@@ -2452,6 +2452,7 @@ app.get('/api/employee-of-the-week', async (req, res) => {
 
             if (!userStats[uid]) {
                 userStats[uid] = {
+                    _id: uid,
                     nombre: userMap[uid].nombre,
                     apellido: userMap[uid].apellido,
                     fotoPerfil: userMap[uid].fotoPerfil,
