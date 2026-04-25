@@ -289,6 +289,7 @@ const ProjectSchema = new mongoose.Schema({
     descripcion: String,
     clienteId: String,
     presupuestoMateriales: { type: Number, default: 0 },
+    presupuestoEstimado: { type: Number, default: 0 }, // Presupuesto de referencia
     estado: { type: String, enum: ['Activo', 'Pausado', 'Finalizado'], default: 'Activo' },
     residenteId: String,
     ubicacion: String
@@ -342,6 +343,7 @@ const VehicleTransactionSchema = new mongoose.Schema({
     userName: { type: String, required: false },
     tipoMovimiento: { type: String, enum: ['Salida', 'Devolucion', 'Devolución', 'Préstamo', 'Gasolina', 'Mantenimiento'], required: true },
     responsable: { type: String, required: false },
+    proyectoId: { type: String, required: false }, // Asociar a un proyecto
     motivo: { type: String, required: false },
     kilometraje: { type: Number, required: false },
     firma: { type: String, required: false }, // Base64
@@ -2716,6 +2718,101 @@ app.get('/api/projects/:id/transactions', async (req, res) => {
     }
 });
 
+app.get('/api/projects/:id/dashboard', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const project = await ProjectModel.findById(id);
+        if (!project) return res.status(404).json({ error: 'Proyecto no encontrado' });
+
+        const invTxs = await InventoryTransaction.find({ proyectoId: id }).populate('itemId');
+        
+        let costoInsumos = 0;
+        let herramientasAsignadas = 0;
+        const desglose = [];
+
+        invTxs.forEach(tx => {
+            if (tx.itemId) {
+                if (tx.itemId.tipo === 'Insumo') {
+                    if (tx.tipoMovimiento === 'Salida') {
+                        const costo = tx.cantidad * (tx.itemId.costoUnitario || 0);
+                        costoInsumos += costo;
+                        desglose.push({
+                            fecha: tx.fecha,
+                            tipo: 'Insumo (Salida)',
+                            descripcion: `${tx.cantidad}x ${tx.itemId.nombre}`,
+                            monto: costo,
+                            responsable: tx.responsable
+                        });
+                    } else if (tx.tipoMovimiento === 'Devolucion' || tx.tipoMovimiento === 'Devolución') {
+                        const costo = tx.cantidad * (tx.itemId.costoUnitario || 0);
+                        costoInsumos -= costo;
+                        desglose.push({
+                            fecha: tx.fecha,
+                            tipo: 'Insumo (Devolución)',
+                            descripcion: `${tx.cantidad}x ${tx.itemId.nombre}`,
+                            monto: -costo,
+                            responsable: tx.responsable
+                        });
+                    }
+                } else if (tx.itemId.tipo === 'Herramienta') {
+                    if (tx.tipoMovimiento === 'Salida' || tx.tipoMovimiento === 'Préstamo') {
+                        herramientasAsignadas += tx.cantidad;
+                        desglose.push({
+                            fecha: tx.fecha,
+                            tipo: 'Herramienta (Asignada)',
+                            descripcion: `${tx.cantidad}x ${tx.itemId.nombre}`,
+                            monto: 0,
+                            responsable: tx.responsable
+                        });
+                    } else if (tx.tipoMovimiento === 'Devolucion' || tx.tipoMovimiento === 'Devolución') {
+                        herramientasAsignadas -= tx.cantidad;
+                        desglose.push({
+                            fecha: tx.fecha,
+                            tipo: 'Herramienta (Devuelta)',
+                            descripcion: `${tx.cantidad}x ${tx.itemId.nombre}`,
+                            monto: 0,
+                            responsable: tx.responsable
+                        });
+                    }
+                }
+            }
+        });
+
+        const vehTxs = await VehicleTransaction.find({ proyectoId: id }).populate('vehicleId');
+        let costoGasolina = 0;
+
+        vehTxs.forEach(tx => {
+            if (tx.tipoMovimiento === 'Gasolina') {
+                costoGasolina += (tx.gasolinaMonto || 0);
+                desglose.push({
+                    fecha: tx.fecha,
+                    tipo: 'Gasolina',
+                    descripcion: `Carga a ${tx.vehicleId ? tx.vehicleId.marca + ' ' + tx.vehicleId.modelo : 'Vehículo'}`,
+                    monto: tx.gasolinaMonto || 0,
+                    responsable: tx.userName || tx.responsable || 'Desconocido'
+                });
+            }
+        });
+
+        desglose.sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
+
+        res.json({
+            project: { ...project.toObject(), id: project._id.toString() },
+            metrics: {
+                presupuestoEstimado: project.presupuestoEstimado || 0,
+                costoInsumos,
+                costoGasolina,
+                herramientasAsignadas: Math.max(0, herramientasAsignadas)
+            },
+            desglose
+        });
+
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ error: 'Error obteniendo dashboard del proyecto.' });
+    }
+});
+
 app.post('/api/projects', async (req, res) => {
     try {
         const { nombre, descripcion, clienteId, presupuestoMateriales, estado, residenteId, ubicacion } = req.body;
@@ -2913,7 +3010,7 @@ app.get('/api/inventory', async (req, res) => {
 
 app.post('/api/inventory', async (req, res) => {
     try {
-        let { tipo, nombre, categoria, numeroParte, marca, ubicacion, cantidadEnStock, unidad } = req.body;
+        let { tipo, nombre, categoria, numeroParte, marca, ubicacion, cantidadEnStock, unidad, costoUnitario } = req.body;
 
         if (!tipo || !nombre) {
             return res.status(400).json({ error: 'Falta tipo o nombre del ítem.' });
@@ -2937,9 +3034,10 @@ app.post('/api/inventory', async (req, res) => {
         marca = (marca || '').toUpperCase();
         ubicacion = (ubicacion || '').toUpperCase();
         cantidadEnStock = parseInt(cantidadEnStock) || 0;
+        costoUnitario = parseFloat(costoUnitario) || 0;
 
         const newItem = new InventoryItem({
-            tipo, nombre, categoria, numeroParte, marca, ubicacion, cantidadEnStock, unidad: unidad || 'piezas'
+            tipo, nombre, categoria, numeroParte, marca, ubicacion, cantidadEnStock, unidad: unidad || 'piezas', costoUnitario
         });
         await newItem.save();
 
@@ -3007,7 +3105,7 @@ Solo devuelve el arreglo JSON válido, sin explicaciones ni formato markdown de 
 app.put('/api/inventory/:id', async (req, res) => {
     try {
         const { id } = req.params;
-        let { tipo, nombre, categoria, numeroParte, marca, ubicacion, cantidadEnStock, unidad } = req.body;
+        let { tipo, nombre, categoria, numeroParte, marca, ubicacion, cantidadEnStock, unidad, costoUnitario } = req.body;
 
         const item = await InventoryItem.findById(id);
         if (!item) return res.status(404).json({ error: 'Item no encontrado.' });
@@ -3020,6 +3118,7 @@ app.put('/api/inventory/:id', async (req, res) => {
         if (marca !== undefined) item.marca = marca.toUpperCase();
         if (ubicacion !== undefined) item.ubicacion = ubicacion.toUpperCase();
         if (cantidadEnStock !== undefined) item.cantidadEnStock = parseInt(cantidadEnStock) || 0;
+        if (costoUnitario !== undefined) item.costoUnitario = parseFloat(costoUnitario) || 0;
 
         await item.save();
 
