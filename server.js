@@ -123,15 +123,15 @@ async function logAdminAction(adminCorreo, action, details) {
 // --- In-Memory Cache System (5 seconds TTL) ---
 const AppCache = {
     cache: {},
-    get: function(key) {
+    get: function (key) {
         if (this.cache[key] && Date.now() < this.cache[key].exp) return this.cache[key].data;
         return null;
     },
-    set: function(key, data, ttlMs = 5000) {
+    set: function (key, data, ttlMs = 5000) {
         this.cache[key] = { data, exp: Date.now() + ttlMs };
     },
-    clear: function(key) {
-        if(key) delete this.cache[key];
+    clear: function (key) {
+        if (key) delete this.cache[key];
         else this.cache = {};
     }
 };
@@ -1778,7 +1778,7 @@ app.post('/api/vehicles/:id/gasoline', async (req, res) => {
         const { userId, userName, gasolinaMonto, gasolinaLitros, gasolinaFoto, kilometrajeActual } = req.body;
         const vehicle = await Vehicle.findById(req.params.id);
         if (!vehicle) return res.status(404).json({ error: 'Vehículo no encontrado.' });
-        
+
         if (kilometrajeActual) {
             vehicle.kilometrajeActual = kilometrajeActual;
             await vehicle.save();
@@ -1801,7 +1801,7 @@ app.post('/api/vehicles/:id/gasoline', async (req, res) => {
         }).catch(e => console.error('Push notification error:', e));
 
         res.status(200).json({ message: 'Gasolina registrada exitosamente.' });
-    } catch(e) {
+    } catch (e) {
         res.status(500).json({ error: 'Error registrando gasolina.' });
     }
 });
@@ -1826,7 +1826,7 @@ app.post('/api/vehicles/:id/maintenance', async (req, res) => {
         await tx.save();
 
         res.status(200).json({ message: 'Mantenimiento registrado exitosamente.' });
-    } catch(e) {
+    } catch (e) {
         res.status(500).json({ error: 'Error registrando mantenimiento.' });
     }
 });
@@ -2285,12 +2285,12 @@ app.post('/api/checkin', async (req, res) => {
         await newCheckIn.save();
 
         io.emit('new_checkin', newCheckIn);
-        
+
         // Notificación de Push al usuario
         if (typeof notifyUser === 'function') {
             notifyUser(userId, {
                 title: `Checador: ${tipo} Registrada`,
-                body: `Se ha registrado tu ${tipo.toLowerCase()} a las ${new Date().toLocaleTimeString('es-MX', { timeZone: 'America/Mexico_City', hour: '2-digit', minute:'2-digit' })}.`
+                body: `Se ha registrado tu ${tipo.toLowerCase()} a las ${new Date().toLocaleTimeString('es-MX', { timeZone: 'America/Mexico_City', hour: '2-digit', minute: '2-digit' })}.`
             });
         }
 
@@ -2340,7 +2340,7 @@ app.post('/api/face-checkin', async (req, res) => {
         if (typeof notifyUser === 'function') {
             notifyUser(userId, {
                 title: `Checador Facial: ${tipo} Registrada`,
-                body: `Se ha registrado tu ${tipo.toLowerCase()} a las ${new Date().toLocaleTimeString('es-MX', { timeZone: 'America/Mexico_City', hour: '2-digit', minute:'2-digit' })} por la cámara IP.`
+                body: `Se ha registrado tu ${tipo.toLowerCase()} a las ${new Date().toLocaleTimeString('es-MX', { timeZone: 'America/Mexico_City', hour: '2-digit', minute: '2-digit' })} por la cámara IP.`
             });
         }
 
@@ -2448,7 +2448,7 @@ app.get('/api/employee-of-the-week', async (req, res) => {
 
         for (const checkin of checkins) {
             const uid = checkin.userId;
-            if (!userMap[uid]) continue; 
+            if (!userMap[uid]) continue;
 
             if (!userStats[uid]) {
                 userStats[uid] = {
@@ -2464,10 +2464,10 @@ app.get('/api/employee-of-the-week', async (req, res) => {
 
             const u = userMap[uid];
             const date = new Date(checkin.timestamp);
-            const dayOfWeek = date.getDay(); 
+            const dayOfWeek = date.getDay();
 
-            let horarioDia = u.usaHorarioPersonalizado && u.horariosPorDia 
-                ? u.horariosPorDia.find(h => h.dia === dayOfWeek) 
+            let horarioDia = u.usaHorarioPersonalizado && u.horariosPorDia
+                ? u.horariosPorDia.find(h => h.dia === dayOfWeek)
                 : globalHorarios.find(h => h.dia === dayOfWeek);
 
             if (horarioDia && horarioDia.activo && horarioDia.entrada) {
@@ -2719,18 +2719,18 @@ app.post('/api/projects', async (req, res) => {
     try {
         const { nombre, descripcion, clienteId, presupuestoMateriales, estado, residenteId, ubicacion } = req.body;
         if (!nombre) return res.status(400).json({ error: 'El nombre es obligatorio.' });
-        
-        const newProject = new ProjectModel({ 
-            nombre, 
-            descripcion, 
-            clienteId, 
-            presupuestoMateriales: presupuestoMateriales || 0, 
-            estado: estado || 'Activo', 
-            residenteId, 
-            ubicacion 
+
+        const newProject = new ProjectModel({
+            nombre,
+            descripcion,
+            clienteId,
+            presupuestoMateriales: presupuestoMateriales || 0,
+            estado: estado || 'Activo',
+            residenteId,
+            ubicacion
         });
         await newProject.save();
-        
+
         const responseObj = { ...newProject.toObject(), id: newProject._id.toString() };
         io.emit('new_project', responseObj);
 
@@ -2749,13 +2749,13 @@ app.put('/api/projects/:id', async (req, res) => {
     try {
         const { id } = req.params;
         const updateData = req.body;
-        
+
         const updatedProject = await ProjectModel.findByIdAndUpdate(id, updateData, { new: true });
         if (!updatedProject) return res.status(404).json({ error: 'Proyecto no encontrado.' });
-        
+
         const responseObj = { ...updatedProject.toObject(), id: updatedProject._id.toString() };
         io.emit('updated_project', responseObj);
-        
+
         res.json(responseObj);
     } catch (e) {
         res.status(500).json({ error: 'Error actualizando proyecto.' });
@@ -3377,7 +3377,7 @@ app.post('/api/inventory/transaction', async (req, res) => {
             const itemObj = itemDocs[i];
             const itemCost = itemObj.costoUnitario || 0;
             const txCost = tipoMovimiento === 'Salida' ? (itemCost * itemTx.cantidad) : 0;
-            
+
             const txParams = {
                 tipoMovimiento, responsable, firma: firma || '', fecha: new Date(),
                 itemId: itemTx.itemId, cantidad: itemTx.cantidad,
@@ -3868,31 +3868,31 @@ async function getSyscomToken() {
     if (syscomToken && Date.now() < syscomTokenExpiry) {
         return syscomToken;
     }
-    
+
     const clientId = process.env.SYSCOM_CLIENT_ID;
     const clientSecret = process.env.SYSCOM_CLIENT_SECRET;
-    
+
     if (!clientId || !clientSecret) {
         throw new Error("Syscom credentials not configured in environment.");
     }
-    
+
     const params = new URLSearchParams();
     params.append('client_id', clientId);
     params.append('client_secret', clientSecret);
     params.append('grant_type', 'client_credentials');
-    
+
     const response = await fetch('https://developers.syscom.mx/oauth/token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: params.toString()
     });
-    
+
     if (!response.ok) {
         const errorText = await response.text();
         console.error("Syscom OAuth Error:", errorText);
         throw new Error("Failed to obtain Syscom Token: " + errorText);
     }
-    
+
     const data = await response.json();
     syscomToken = data.access_token;
     // Expira en data.expires_in segundos. Restamos 60s por seguridad.
@@ -3904,15 +3904,15 @@ app.get('/api/syscom/search', async (req, res) => {
     try {
         const { q } = req.query;
         if (!q) return res.status(400).json({ error: 'Falta término de búsqueda' });
-        
+
         const token = await getSyscomToken();
         const response = await fetch(`https://developers.syscom.mx/api/v1/productos?busqueda=${encodeURIComponent(q)}`, {
             headers: { 'Authorization': `Bearer ${token}` }
         });
-        
+
         if (!response.ok) throw new Error("Error consultando Syscom API");
         const data = await response.json();
-        
+
         res.json(data);
     } catch (e) {
         console.error("Syscom Error:", e.message);
