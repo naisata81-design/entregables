@@ -385,6 +385,7 @@ const VehicleSchema = new mongoose.Schema({
     estado: { type: String, enum: ['Disponible', 'Prestado', 'Mantenimiento', 'Pendiente de Confirmación'], default: 'Disponible' },
     bitacoraEsperada: { type: [String], default: ['Gato', 'Refacción', 'Cables auxiliares', 'Extintor'] },
     equipmentPhotos: { type: [String], default: [] },
+    documentosVehiculo: { type: [String], default: [] },
     lastDamageReport: { type: String, default: '' },
     currentUserId: { type: String, default: null },
     currentUserName: { type: String, default: null },
@@ -1619,10 +1620,10 @@ app.get('/api/vehicles/:id/last-loan', async (req, res) => {
 
 app.post('/api/vehicles', async (req, res) => {
     try {
-        const { marca, modelo, color, placas, bitacoraEsperada, equipmentPhotos } = req.body;
+        const { marca, modelo, color, placas, bitacoraEsperada, equipmentPhotos, documentosVehiculo } = req.body;
         if (!marca || !modelo || !placas) return res.status(400).json({ error: 'Marca, modelo y placas son obligatorios.' });
 
-        const newVehicle = new Vehicle({ marca, modelo, color, placas, bitacoraEsperada, equipmentPhotos });
+        const newVehicle = new Vehicle({ marca, modelo, color, placas, bitacoraEsperada, equipmentPhotos, documentosVehiculo });
         await newVehicle.save();
         res.status(201).json(newVehicle);
     } catch (e) {
