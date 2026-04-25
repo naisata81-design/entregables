@@ -2815,7 +2815,7 @@ app.get('/api/projects/:id/dashboard', async (req, res) => {
 
 app.post('/api/projects', async (req, res) => {
     try {
-        const { nombre, descripcion, clienteId, presupuestoMateriales, estado, residenteId, ubicacion } = req.body;
+        const { nombre, descripcion, clienteId, presupuestoMateriales, presupuestoEstimado, estado, residenteId, ubicacion } = req.body;
         if (!nombre) return res.status(400).json({ error: 'El nombre es obligatorio.' });
 
         const newProject = new ProjectModel({
@@ -2823,6 +2823,7 @@ app.post('/api/projects', async (req, res) => {
             descripcion,
             clienteId,
             presupuestoMateriales: presupuestoMateriales || 0,
+            presupuestoEstimado: presupuestoEstimado || 0,
             estado: estado || 'Activo',
             residenteId,
             ubicacion
@@ -2839,7 +2840,8 @@ app.post('/api/projects', async (req, res) => {
 
         res.status(201).json(responseObj);
     } catch (e) {
-        res.status(500).json({ error: 'Error agregando proyecto.' });
+        console.error('Error creando proyecto:', e);
+        res.status(500).json({ error: 'Error agregando proyecto: ' + e.message, details: e.stack });
     }
 });
 
@@ -4126,4 +4128,5 @@ app.post('/api/it/simulate-cron', (req, res) => {
     }
 });
 // ---------------------------
+
 
