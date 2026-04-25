@@ -267,7 +267,12 @@ const VacationRequest = mongoose.model('VacationRequest', VacationRequestSchema)
 
 const ProjectSchema = new mongoose.Schema({
     nombre: String,
-    descripcion: String
+    descripcion: String,
+    clienteId: String,
+    presupuestoMateriales: { type: Number, default: 0 },
+    estado: { type: String, enum: ['Activo', 'Pausado', 'Finalizado'], default: 'Activo' },
+    residenteId: String,
+    ubicacion: String
 }, { timestamps: true });
 const ProjectModel = mongoose.model('Project', ProjectSchema);
 
@@ -298,6 +303,7 @@ const InventoryItemSchema = new mongoose.Schema({
     numeroParte: { type: String, required: true, unique: true },
     marca: { type: String, default: '' },
     ubicacion: { type: String, default: '' },
+    costoUnitario: { type: Number, default: 0 },
     cantidadDescompuesta: { type: Number, default: 0 },
     historialFallas: [{
         fecha: { type: Date, default: Date.now },
@@ -377,6 +383,8 @@ const InventoryTransactionSchema = new mongoose.Schema({
     tipoMovimiento: { type: String, enum: ['Salida', 'Devolucion', 'Entrada'], required: true },
     cantidad: { type: Number, required: true },
     responsable: { type: String, required: true },
+    proyectoId: { type: String, required: false },
+    costoTotal: { type: Number, default: 0 },
     firma: { type: String, required: false }, // Base64
     estadoConfirmacion: { type: String, enum: ['Confirmado', 'Pendiente', 'Rechazado'], default: 'Confirmado' },
     fecha: { type: Date, default: Date.now }
@@ -2562,23 +2570,62 @@ app.get('/api/projects', async (req, res) => {
     }
 });
 
+app.get('/api/projects/:id/transactions', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const txs = await InventoryTransaction.find({ proyectoId: id })
+            .populate('itemId', 'nombre numeroParte tipo')
+            .sort({ fecha: -1 });
+        res.json(txs);
+    } catch (e) {
+        res.status(500).json({ error: 'Error obteniendo transacciones del proyecto.' });
+    }
+});
+
 app.post('/api/projects', async (req, res) => {
     try {
-        const { nombre, descripcion } = req.body;
+        const { nombre, descripcion, clienteId, presupuestoMateriales, estado, residenteId, ubicacion } = req.body;
         if (!nombre) return res.status(400).json({ error: 'El nombre es obligatorio.' });
-        const newProject = new ProjectModel({ nombre, descripcion });
+        
+        const newProject = new ProjectModel({ 
+            nombre, 
+            descripcion, 
+            clienteId, 
+            presupuestoMateriales: presupuestoMateriales || 0, 
+            estado: estado || 'Activo', 
+            residenteId, 
+            ubicacion 
+        });
         await newProject.save();
+        
         const responseObj = { ...newProject.toObject(), id: newProject._id.toString() };
         io.emit('new_project', responseObj);
 
         notifyAll({
-            title: "Nuevo Proyecto Documental",
-            body: `Se ha abierto un nuevo archivo de proyecto: ${nombre}.`
+            title: "Nuevo Proyecto Abierto",
+            body: `Se ha abierto un nuevo proyecto/obra: ${nombre}.`
         });
 
         res.status(201).json(responseObj);
     } catch (e) {
         res.status(500).json({ error: 'Error agregando proyecto.' });
+    }
+});
+
+app.put('/api/projects/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const updateData = req.body;
+        
+        const updatedProject = await ProjectModel.findByIdAndUpdate(id, updateData, { new: true });
+        if (!updatedProject) return res.status(404).json({ error: 'Proyecto no encontrado.' });
+        
+        const responseObj = { ...updatedProject.toObject(), id: updatedProject._id.toString() };
+        io.emit('updated_project', responseObj);
+        
+        res.json(responseObj);
+    } catch (e) {
+        res.status(500).json({ error: 'Error actualizando proyecto.' });
     }
 });
 
@@ -3134,7 +3181,7 @@ Retorna ÚNICAMENTE un arreglo JSON válido, sin explicaciones, sin markdown de 
 
 app.post('/api/inventory/transaction', async (req, res) => {
     try {
-        const { tipoMovimiento, responsable, firma } = req.body;
+        const { tipoMovimiento, responsable, firma, proyectoId } = req.body;
         // Support both old format { itemId, cantidad } and new array format { items: [{itemId, cantidad}] }
         let itemsArr = req.body.items;
         if (!itemsArr && req.body.itemId && req.body.cantidad) {
@@ -3188,10 +3235,17 @@ app.post('/api/inventory/transaction', async (req, res) => {
         }
 
         // 3. Save transactions for each item
-        for (const itemTx of txItemsArr) {
+        for (let i = 0; i < txItemsArr.length; i++) {
+            const itemTx = txItemsArr[i];
+            const itemObj = itemDocs[i];
+            const itemCost = itemObj.costoUnitario || 0;
+            const txCost = tipoMovimiento === 'Salida' ? (itemCost * itemTx.cantidad) : 0;
+            
             const txParams = {
                 tipoMovimiento, responsable, firma: firma || '', fecha: new Date(),
                 itemId: itemTx.itemId, cantidad: itemTx.cantidad,
+                proyectoId: proyectoId || null,
+                costoTotal: txCost,
                 estadoConfirmacion: tipoMovimiento === 'Salida' ? 'Pendiente' : 'Confirmado'
             };
             const tx = new InventoryTransaction(txParams);
