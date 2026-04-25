@@ -120,10 +120,26 @@ async function logAdminAction(adminCorreo, action, details) {
 }
 
 
+// --- In-Memory Cache System (5 seconds TTL) ---
+const AppCache = {
+    cache: {},
+    get: function(key) {
+        if (this.cache[key] && Date.now() < this.cache[key].exp) return this.cache[key].data;
+        return null;
+    },
+    set: function(key, data, ttlMs = 5000) {
+        this.cache[key] = { data, exp: Date.now() + ttlMs };
+    },
+    clear: function(key) {
+        if(key) delete this.cache[key];
+        else this.cache = {};
+    }
+};
+
 // Run migration to assure numeroEmpleado
 async function asegurarNumeroEmpleado() {
     try {
-        const usersSinNumero = await User.find({ numeroEmpleado: { $exists: false } }).sort({ createdAt: 1 });
+        const usersSinNumero = await User.find({ numeroEmpleado: { $exists: false } }).select('_id').sort({ createdAt: 1 });
         if (usersSinNumero.length === 0) return;
 
         let maxEmpleado = await User.findOne({ numeroEmpleado: { $exists: true } }).sort({ numeroEmpleado: -1 });
@@ -260,6 +276,9 @@ const VacationRequestSchema = new mongoose.Schema({
 // Optimizar ordenamiento para evitar memory limits
 TicketSchema.index({ siteId: 1, createdAt: -1 });
 VacationRequestSchema.index({ userId: 1, createdAt: -1 });
+CheckInSchema.index({ userId: 1, timestamp: -1 });
+UserSchema.index({ rol: 1 });
+UserSchema.index({ estadoCuenta: 1 });
 
 const Ticket = mongoose.model('Ticket', TicketSchema);
 const CheckIn = mongoose.model('CheckIn', CheckInSchema);
@@ -346,6 +365,7 @@ const VehicleTransactionSchema = new mongoose.Schema({
     mantenimientoTaller: { type: String, default: '' },
     fecha: { type: Date, default: Date.now }
 }, { timestamps: true });
+VehicleTransactionSchema.index({ vehicleId: 1, fecha: -1 });
 const VehicleTransaction = mongoose.model('VehicleTransaction', VehicleTransactionSchema);
 
 const DamageReportSchema = new mongoose.Schema({
@@ -407,6 +427,8 @@ const InventoryTransactionSchema = new mongoose.Schema({
     estadoConfirmacion: { type: String, enum: ['Confirmado', 'Pendiente', 'Rechazado'], default: 'Confirmado' },
     fecha: { type: Date, default: Date.now }
 }, { timestamps: true });
+InventoryTransactionSchema.index({ itemId: 1, fecha: -1 });
+InventoryTransactionSchema.index({ responsable: 1 });
 const InventoryTransaction = mongoose.model('InventoryTransaction', InventoryTransactionSchema);
 
 const HelpRequestSchema = new mongoose.Schema({
@@ -692,7 +714,7 @@ async function notifyAll(payload) {
 }
 
 async function notifyUserByName(fullName, payload) {
-    const users = await User.find({});
+    const users = await User.find({}).select('_id nombre apellido horariosPorDia usaHorarioPersonalizado');
     const targetUser = users.find(u => `${u.nombre} ${u.apellido}`.trim().toLowerCase() === fullName.trim().toLowerCase());
     if (targetUser) {
         await notifyUser(targetUser._id.toString(), payload);
@@ -899,7 +921,10 @@ app.post('/api/register', async (req, res) => {
 // 1.2 Obtener Usuarios (Para Admin)
 app.get('/api/users', async (req, res) => {
     try {
-        const users = await User.find().select('-password -firma').sort({ createdAt: -1 });
+        const cached = AppCache.get('usersAdminList');
+        if (cached) return res.json(cached);
+
+        const users = await User.find().select('-password -firma -faceDescriptor -fotoPerfil -evidenciaTerminos').sort({ createdAt: -1 });
         const usersData = [];
         for (const user of users) {
             const diasCalc = await calcularVacacionesDinamicamente(user);
@@ -907,6 +932,7 @@ app.get('/api/users', async (req, res) => {
             userObj.diasVacacionesDisponibles = diasCalc;
             usersData.push(userObj);
         }
+        AppCache.set('usersAdminList', usersData, 5000); // 5 seconds TTL
         res.json(usersData);
     } catch (e) {
         res.status(500).json({ error: 'Error obteniendo usuarios.' });
@@ -925,7 +951,7 @@ app.get('/api/users/faces', async (req, res) => {
 
 app.get('/api/users/pending', async (req, res) => {
     try {
-        const pendingUsers = await User.find({ estadoCuenta: 'pendiente' }).select('-password -firma').sort({ createdAt: -1 });
+        const pendingUsers = await User.find({ estadoCuenta: 'pendiente' }).select('-password -firma -faceDescriptor -fotoPerfil -evidenciaTerminos').sort({ createdAt: -1 });
         res.json(pendingUsers);
     } catch (e) {
         res.status(500).json({ error: 'Error obteniendo solicitudes de cuenta.' });
@@ -1592,10 +1618,20 @@ app.delete('/api/companies/:id', async (req, res) => {
 // 4. Vehicles (Tracking)
 app.get('/api/vehicles', async (req, res) => {
     try {
-        const vehicles = await Vehicle.find().select('-lastDamageReport').sort({ createdAt: -1 });
+        const vehicles = await Vehicle.find().select('-lastDamageReport -equipmentPhotos -documentosVehiculo').sort({ createdAt: -1 });
         res.json(vehicles);
     } catch (e) {
         res.status(500).json({ error: 'Error obteniendo vehículos.' });
+    }
+});
+
+app.get('/api/vehicles/:id/photos', async (req, res) => {
+    try {
+        const v = await Vehicle.findById(req.params.id).select('equipmentPhotos documentosVehiculo');
+        if (!v) return res.status(404).json({ error: 'Vehículo no encontrado' });
+        res.json({ equipmentPhotos: v.equipmentPhotos, documentosVehiculo: v.documentosVehiculo });
+    } catch (e) {
+        res.status(500).json({ error: 'Error obteniendo fotos del vehículo' });
     }
 });
 
@@ -1757,6 +1793,13 @@ app.post('/api/vehicles/:id/gasoline', async (req, res) => {
         });
         await tx.save();
 
+        // Notificar a los administradores
+        notifyAdmins({
+            title: "Nuevo Ticket de Gasolina",
+            body: `${userName} ha registrado una carga de gasolina por $${gasolinaMonto} para el vehículo ${vehicle.placas}.`,
+            icon: "/icon.png"
+        }).catch(e => console.error('Push notification error:', e));
+
         res.status(200).json({ message: 'Gasolina registrada exitosamente.' });
     } catch(e) {
         res.status(500).json({ error: 'Error registrando gasolina.' });
@@ -1796,7 +1839,7 @@ app.get('/api/users/:id/vehicles', async (req, res) => {
         const txs = await VehicleTransaction.find({
             userId: req.params.id,
             fecha: { $gte: oneYearAgo }
-        }).sort({ fecha: -1 }).populate('vehicleId');
+        }).select('-firma -firmaUsuario').sort({ fecha: -1 }).populate('vehicleId');
 
         // Uso de la nueva propiedad global del vehículo para evitar bucles visuales:
         const currentVehicles = await Vehicle.find({ currentUserId: req.params.id });
@@ -1818,7 +1861,7 @@ app.get('/api/vehicles/:id/history', async (req, res) => {
         const txs = await VehicleTransaction.find({
             vehicleId: req.params.id,
             fecha: { $gte: oneYearAgo }
-        }).sort({ fecha: -1 }).populate('vehicleId');
+        }).select('-firma -firmaUsuario').sort({ fecha: -1 }).populate('vehicleId');
 
         res.json({ history: txs });
     } catch (e) {
@@ -2387,7 +2430,7 @@ app.get('/api/employee-of-the-week', async (req, res) => {
         const globalHorarios = settings ? settings.horariosPorDia : [];
 
         // Pre-fetch users
-        const users = await User.find({ rol: { $in: ['user', 'Clase C'] } });
+        const users = await User.find({ rol: { $in: ['user', 'Clase C'] } }).select('_id nombre apellido rol horariosPorDia usaHorarioPersonalizado fechaIngreso fechaReinicioAsistencia');
         const userMap = {};
         users.forEach(u => userMap[u._id.toString()] = u);
 
@@ -2840,8 +2883,12 @@ app.delete('/api/markers/:id', async (req, res) => {
 // --- Inventory Endpoints ---
 app.get('/api/inventory', async (req, res) => {
     try {
+        const cached = AppCache.get('inventoryList');
+        if (cached) return res.json(cached);
+
         const items = await InventoryItem.find().sort({ createdAt: -1 });
         const mapped = items.map(i => ({ ...i.toObject(), id: i._id.toString() }));
+        AppCache.set('inventoryList', mapped, 5000); // 5 seconds TTL
         res.json(mapped);
     } catch (e) {
         res.status(500).json({ error: 'Error obteniendo inventario.' });
@@ -3463,7 +3510,9 @@ app.get('/api/inventory/transactions/history', async (req, res) => {
         sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
 
         const transactions = await InventoryTransaction.find({ fecha: { $gte: sixMonthsAgo } })
+            .select('-firma')
             .sort({ fecha: -1 })
+            .limit(500)
             .populate('itemId', 'nombre numeroParte tipo');
 
         res.json(transactions);
@@ -3475,7 +3524,7 @@ app.get('/api/inventory/transactions/history', async (req, res) => {
 
 app.get('/api/inventory/:id/transactions', async (req, res) => {
     try {
-        const transactions = await InventoryTransaction.find({ itemId: req.params.id }).sort({ fecha: -1 });
+        const transactions = await InventoryTransaction.find({ itemId: req.params.id }).select('-firma').sort({ fecha: -1 });
         res.json(transactions);
     } catch (e) {
         res.status(500).json({ error: 'Error obteniendo historial.' });
@@ -3484,7 +3533,9 @@ app.get('/api/inventory/:id/transactions', async (req, res) => {
 
 app.get('/api/inventory/all-active-loans', async (req, res) => {
     try {
-        const transactions = await InventoryTransaction.find({ estadoConfirmacion: { $ne: 'Rechazado' } }).populate('itemId', 'nombre');
+        const transactions = await InventoryTransaction.find({ estadoConfirmacion: { $ne: 'Rechazado' } })
+            .select('-firma')
+            .populate('itemId', 'nombre');
         const countMap = {};
         for (const t of transactions) {
             if (t.itemId) {
@@ -3506,7 +3557,9 @@ app.get('/api/inventory/loans/:responsable', async (req, res) => {
     try {
         const { responsable } = req.params;
         // Match the exact string of the selected user or entered "OTRO" name
-        const transactions = await InventoryTransaction.find({ responsable: responsable }).populate('itemId');
+        const transactions = await InventoryTransaction.find({ responsable: responsable })
+            .select('-firma')
+            .populate('itemId');
 
         const countMap = {};
         for (const t of transactions) {
