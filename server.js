@@ -321,7 +321,7 @@ const VehicleTransactionSchema = new mongoose.Schema({
     vehicleId: { type: mongoose.Schema.Types.ObjectId, ref: 'Vehicle', required: true },
     userId: { type: String, required: false },
     userName: { type: String, required: false },
-    tipoMovimiento: { type: String, enum: ['Salida', 'Devolucion', 'Devolución', 'Préstamo'], required: true },
+    tipoMovimiento: { type: String, enum: ['Salida', 'Devolucion', 'Devolución', 'Préstamo', 'Gasolina', 'Mantenimiento'], required: true },
     responsable: { type: String, required: false },
     motivo: { type: String, required: false },
     kilometraje: { type: Number, required: false },
@@ -331,6 +331,19 @@ const VehicleTransactionSchema = new mongoose.Schema({
     bitacoraRevisada: { type: [String], default: [] },
     imgReporteDanos: { type: String, required: false },
     estadoConfirmacion: { type: String, enum: ['Confirmado', 'Pendiente', 'Rechazado'], default: 'Confirmado' },
+    checklist: {
+        aceite: { type: Boolean, default: true },
+        llantas: { type: Boolean, default: true },
+        limpieza: { type: Boolean, default: true },
+        documentos: { type: Boolean, default: true }
+    },
+    checklistNotas: { type: String, default: '' },
+    gasolinaMonto: { type: Number, default: 0 },
+    gasolinaLitros: { type: Number, default: 0 },
+    gasolinaFoto: { type: String, default: '' },
+    mantenimientoCosto: { type: Number, default: 0 },
+    mantenimientoPiezas: { type: String, default: '' },
+    mantenimientoTaller: { type: String, default: '' },
     fecha: { type: Date, default: Date.now }
 }, { timestamps: true });
 const VehicleTransaction = mongoose.model('VehicleTransaction', VehicleTransactionSchema);
@@ -374,7 +387,11 @@ const VehicleSchema = new mongoose.Schema({
     equipmentPhotos: { type: [String], default: [] },
     lastDamageReport: { type: String, default: '' },
     currentUserId: { type: String, default: null },
-    currentUserName: { type: String, default: null }
+    currentUserName: { type: String, default: null },
+    kilometrajeActual: { type: Number, default: 0 },
+    proximoServicioKm: { type: Number, default: 10000 },
+    vencimientoSeguro: { type: Date, default: null },
+    vencimientoVerificacion: { type: Date, default: null }
 }, { timestamps: true });
 const Vehicle = mongoose.model('Vehicle', VehicleSchema);
 
@@ -1635,7 +1652,7 @@ app.delete('/api/vehicles/:id', async (req, res) => {
 // Vehicle Transactions (Loans/Returns)
 app.post('/api/vehicles/:id/loan', async (req, res) => {
     try {
-        const { userId, userName, notas, bitacoraRevisada, imgReporteDanos } = req.body;
+        const { userId, userName, notas, bitacoraRevisada, imgReporteDanos, checklist, checklistNotas } = req.body;
         const vehicle = await Vehicle.findById(req.params.id);
         if (!vehicle) return res.status(404).json({ error: 'Vehículo no encontrado.' });
         if (vehicle.estado !== 'Disponible') return res.status(400).json({ error: 'El vehículo no está disponible.' });
@@ -1653,6 +1670,8 @@ app.post('/api/vehicles/:id/loan', async (req, res) => {
             notas,
             bitacoraRevisada,
             imgReporteDanos,
+            checklist,
+            checklistNotas,
             estadoConfirmacion: 'Pendiente'
         });
         await tx.save();
@@ -1674,7 +1693,7 @@ app.post('/api/vehicles/:id/loan', async (req, res) => {
 
 app.post('/api/vehicles/:id/return', async (req, res) => {
     try {
-        const { userId, userName, notas, bitacoraRevisada, imgReporteDanos } = req.body;
+        const { userId, userName, notas, bitacoraRevisada, imgReporteDanos, kilometrajeActual, checklist, checklistNotas } = req.body;
         const vehicle = await Vehicle.findById(req.params.id);
         if (!vehicle) return res.status(404).json({ error: 'Vehículo no encontrado.' });
         if (vehicle.estado !== 'Prestado') return res.status(400).json({ error: 'El vehículo no está prestado actualmente.' });
@@ -1682,6 +1701,7 @@ app.post('/api/vehicles/:id/return', async (req, res) => {
         vehicle.estado = 'Disponible';
         vehicle.currentUserId = null;
         vehicle.currentUserName = null;
+        if (kilometrajeActual) vehicle.kilometrajeActual = kilometrajeActual;
         if (imgReporteDanos) {
             vehicle.lastDamageReport = imgReporteDanos;
         }
@@ -1694,7 +1714,10 @@ app.post('/api/vehicles/:id/return', async (req, res) => {
             tipoMovimiento: 'Devolución',
             notas,
             bitacoraRevisada,
-            imgReporteDanos
+            imgReporteDanos,
+            kilometraje: kilometrajeActual,
+            checklist,
+            checklistNotas
         });
         await tx.save();
 
@@ -1710,6 +1733,57 @@ app.post('/api/vehicles/:id/return', async (req, res) => {
         res.status(200).json({ message: 'Vehículo devuelto exitosamente.', transaction: tx });
     } catch (e) {
         res.status(500).json({ error: 'Error interno devolviendo.' });
+    }
+});
+
+app.post('/api/vehicles/:id/gasoline', async (req, res) => {
+    try {
+        const { userId, userName, gasolinaMonto, gasolinaLitros, gasolinaFoto, kilometrajeActual } = req.body;
+        const vehicle = await Vehicle.findById(req.params.id);
+        if (!vehicle) return res.status(404).json({ error: 'Vehículo no encontrado.' });
+        
+        if (kilometrajeActual) {
+            vehicle.kilometrajeActual = kilometrajeActual;
+            await vehicle.save();
+        }
+
+        const tx = new VehicleTransaction({
+            vehicleId: vehicle._id,
+            userId, userName,
+            tipoMovimiento: 'Gasolina',
+            gasolinaMonto, gasolinaLitros, gasolinaFoto,
+            kilometraje: kilometrajeActual
+        });
+        await tx.save();
+
+        res.status(200).json({ message: 'Gasolina registrada exitosamente.' });
+    } catch(e) {
+        res.status(500).json({ error: 'Error registrando gasolina.' });
+    }
+});
+
+app.post('/api/vehicles/:id/maintenance', async (req, res) => {
+    try {
+        const { notas, mantenimientoCosto, mantenimientoPiezas, mantenimientoTaller, fecha } = req.body;
+        const vehicle = await Vehicle.findById(req.params.id);
+        if (!vehicle) return res.status(404).json({ error: 'Vehículo no encontrado.' });
+
+        const tx = new VehicleTransaction({
+            vehicleId: vehicle._id,
+            userId: 'ADMIN',
+            userName: 'Administrador',
+            tipoMovimiento: 'Mantenimiento',
+            notas,
+            mantenimientoCosto,
+            mantenimientoPiezas,
+            mantenimientoTaller,
+            fecha: fecha ? new Date(fecha) : new Date()
+        });
+        await tx.save();
+
+        res.status(200).json({ message: 'Mantenimiento registrado exitosamente.' });
+    } catch(e) {
+        res.status(500).json({ error: 'Error registrando mantenimiento.' });
     }
 });
 
