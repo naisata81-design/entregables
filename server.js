@@ -290,7 +290,7 @@ const ProjectSchema = new mongoose.Schema({
     clienteId: String,
     presupuestoMateriales: { type: Number, default: 0 },
     presupuestoEstimado: { type: Number, default: 0 }, // Presupuesto de referencia
-    estado: { type: String, enum: ['Activo', 'Pausado', 'Finalizado'], default: 'Activo' },
+    estado: { type: String, enum: ['Borrador', 'Enviada', 'Aceptada', 'Rechazada', 'Activo', 'Pausado', 'Finalizado'], default: 'Borrador' },
     residenteId: String,
     ubicacion: String
 }, { timestamps: true });
@@ -4128,5 +4128,4 @@ app.post('/api/it/simulate-cron', (req, res) => {
     }
 });
 // ---------------------------
-
 
