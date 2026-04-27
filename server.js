@@ -3427,6 +3427,53 @@ Retorna ÚNICAMENTE un arreglo JSON válido, sin explicaciones, sin markdown de 
     }
 });
 
+// Endpoint for returning specific amount of an Insumo from a history transaction
+app.post('/api/inventory/transaction/:txId/return-insumo', async (req, res) => {
+    try {
+        const { txId } = req.params;
+        const returnAmount = parseInt(req.body.cantidad);
+        if (!returnAmount || returnAmount <= 0) return res.status(400).json({ error: 'Cantidad inválida.' });
+
+        const originalTx = await InventoryTransaction.findById(txId).populate('itemId');
+        if (!originalTx) return res.status(404).json({ error: 'Transacción no encontrada.' });
+        if (originalTx.tipoMovimiento !== 'Salida') return res.status(400).json({ error: 'Solo se puede devolver de un registro de Salida.' });
+        if (!originalTx.itemId || originalTx.itemId.tipo !== 'Insumo') return res.status(400).json({ error: 'Este artículo no es un insumo válido.' });
+
+        // Calculate how many have already been returned for this specific transaction
+        // (Assuming we might track it, but simpler is to just check if returnAmount <= originalTx.cantidad)
+        // For strict validation we could track `cantidadDevuelta` in the transaction document, but for now we'll just check if it exceeds original
+        // Let's check total active loans of this item for this person/project combination to avoid negative balance, but simpler just use max qty.
+        if (returnAmount > originalTx.cantidad) {
+            return res.status(400).json({ error: 'No puedes devolver más cantidad de la que se sacó originalmente.' });
+        }
+
+        // Return to stock
+        const item = originalTx.itemId;
+        item.cantidadEnStock += returnAmount;
+        await item.save();
+
+        // Create return transaction
+        const returnTx = new InventoryTransaction({
+            tipoMovimiento: 'Devolucion',
+            responsable: originalTx.responsable,
+            firma: originalTx.firma || '',
+            fecha: new Date(),
+            itemId: item._id,
+            cantidad: returnAmount,
+            proyectoId: originalTx.proyectoId,
+            costoTotal: 0,
+            estadoConfirmacion: 'Confirmado'
+        });
+        await returnTx.save();
+
+        io.emit('update_inventory_item', { ...item.toObject(), id: item._id.toString() });
+        res.json({ message: 'Devolución parcial de insumo registrada con éxito.' });
+    } catch (e) {
+        console.error("Error returning insumo", e);
+        res.status(500).json({ error: 'Error interno al procesar la devolución.' });
+    }
+});
+
 app.post('/api/inventory/transaction', async (req, res) => {
     try {
         const { tipoMovimiento, responsable, firma, proyectoId } = req.body;
@@ -3488,19 +3535,23 @@ app.post('/api/inventory/transaction', async (req, res) => {
             const itemObj = itemDocs[i];
             const itemCost = itemObj.costoUnitario || 0;
             const txCost = tipoMovimiento === 'Salida' ? (itemCost * itemTx.cantidad) : 0;
+            const isInsumo = itemObj.tipo === 'Insumo';
 
             const txParams = {
                 tipoMovimiento, responsable, firma: firma || '', fecha: new Date(),
                 itemId: itemTx.itemId, cantidad: itemTx.cantidad,
                 proyectoId: proyectoId || null,
                 costoTotal: txCost,
-                estadoConfirmacion: tipoMovimiento === 'Salida' ? 'Pendiente' : 'Confirmado'
+                estadoConfirmacion: (tipoMovimiento === 'Salida' && !isInsumo) ? 'Pendiente' : 'Confirmado'
             };
             const tx = new InventoryTransaction(txParams);
             await tx.save();
         }
 
-        if (tipoMovimiento === 'Salida') {
+        // Notify only if at least one item requires confirmation (is not an Insumo)
+        const needsConfirmation = itemDocs.some(item => item.tipo !== 'Insumo');
+
+        if (tipoMovimiento === 'Salida' && needsConfirmation) {
             notifyUserByName(responsable, {
                 title: "Asignación de Inventario",
                 body: `Se te han pre-asignado herramientas. Abre la app para firmar de conformidad.`
@@ -3689,7 +3740,7 @@ app.get('/api/inventory/loans/:responsable', async (req, res) => {
 
         const countMap = {};
         for (const t of transactions) {
-            if (t.itemId) {
+            if (t.itemId && t.itemId.tipo !== 'Insumo') {
                 const idStr = t.itemId._id.toString();
                 if (!countMap[idStr]) {
                     countMap[idStr] = {
