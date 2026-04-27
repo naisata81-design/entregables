@@ -1340,7 +1340,7 @@ app.post('/api/personal-equipment', async (req, res) => {
         notifyUser(userId, {
             title: "Nueva Asignación de Equipo",
             body: `Se te ha asignado: ${equipmentName}. Por favor, entrá a la aplicación para firmar de confirmación o rechazarlo.`,
-            data: { view: 'herramientas' }
+            data: { view: 'herramientas', action: 'openPending' }
         });
 
         const responseObj = { ...newEq.toObject(), id: newEq._id.toString() };
@@ -1737,7 +1737,7 @@ app.post('/api/vehicles/:id/loan', async (req, res) => {
             notifyUserByName(userName, {
                 title: "Vehículo Asignado",
                 body: `Se te ha asignado un vehículo. Por favor, abre la app para firmar de conformidad.`,
-                data: { view: 'herramientas' }
+                data: { view: 'herramientas', action: 'openPending' }
             });
         }
 
@@ -3566,7 +3566,7 @@ app.post('/api/inventory/transaction', async (req, res) => {
             notifyUserByName(responsable, {
                 title: "Asignación de Inventario",
                 body: `Se te han pre-asignado herramientas. Abre la app para firmar de conformidad.`,
-                data: { view: 'herramientas' }
+                data: { view: 'herramientas', action: 'openPending' }
             });
         } else {
             notifyUserByName(responsable, {
