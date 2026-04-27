@@ -1620,7 +1620,22 @@ app.delete('/api/companies/:id', async (req, res) => {
 // 4. Vehicles (Tracking)
 app.get('/api/vehicles', async (req, res) => {
     try {
-        const vehicles = await Vehicle.find().select('-lastDamageReport -equipmentPhotos -documentosVehiculo').sort({ createdAt: -1 });
+        const vehicles = await Vehicle.aggregate([
+            {
+                $addFields: {
+                    equipmentCount: { $size: { $ifNull: ["$equipmentPhotos", []] } },
+                    docsCount: { $size: { $ifNull: ["$documentosVehiculo", []] } }
+                }
+            },
+            {
+                $project: {
+                    lastDamageReport: 0,
+                    equipmentPhotos: 0,
+                    documentosVehiculo: 0
+                }
+            },
+            { $sort: { createdAt: -1 } }
+        ]);
         res.json(vehicles);
     } catch (e) {
         res.status(500).json({ error: 'Error obteniendo vehículos.' });
