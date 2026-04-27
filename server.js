@@ -2726,7 +2726,7 @@ app.get('/api/projects/:id/dashboard', async (req, res) => {
 
         const invTxs = await InventoryTransaction.find({ proyectoId: id }).populate('itemId');
         
-        let costoInsumos = 0;
+        let insumosConsumidos = 0;
         let herramientasAsignadas = 0;
         const desglose = [];
 
@@ -2734,23 +2734,19 @@ app.get('/api/projects/:id/dashboard', async (req, res) => {
             if (tx.itemId) {
                 if (tx.itemId.tipo === 'Insumo') {
                     if (tx.tipoMovimiento === 'Salida') {
-                        const costo = tx.cantidad * (tx.itemId.costoUnitario || 0);
-                        costoInsumos += costo;
+                        insumosConsumidos += tx.cantidad;
                         desglose.push({
                             fecha: tx.fecha,
                             tipo: 'Insumo (Salida)',
                             descripcion: `${tx.cantidad}x ${tx.itemId.nombre}`,
-                            monto: costo,
                             responsable: tx.responsable
                         });
                     } else if (tx.tipoMovimiento === 'Devolucion' || tx.tipoMovimiento === 'Devolución') {
-                        const costo = tx.cantidad * (tx.itemId.costoUnitario || 0);
-                        costoInsumos -= costo;
+                        insumosConsumidos -= tx.cantidad;
                         desglose.push({
                             fecha: tx.fecha,
                             tipo: 'Insumo (Devolución)',
                             descripcion: `${tx.cantidad}x ${tx.itemId.nombre}`,
-                            monto: -costo,
                             responsable: tx.responsable
                         });
                     }
@@ -2761,7 +2757,6 @@ app.get('/api/projects/:id/dashboard', async (req, res) => {
                             fecha: tx.fecha,
                             tipo: 'Herramienta (Asignada)',
                             descripcion: `${tx.cantidad}x ${tx.itemId.nombre}`,
-                            monto: 0,
                             responsable: tx.responsable
                         });
                     } else if (tx.tipoMovimiento === 'Devolucion' || tx.tipoMovimiento === 'Devolución') {
@@ -2770,7 +2765,6 @@ app.get('/api/projects/:id/dashboard', async (req, res) => {
                             fecha: tx.fecha,
                             tipo: 'Herramienta (Devuelta)',
                             descripcion: `${tx.cantidad}x ${tx.itemId.nombre}`,
-                            monto: 0,
                             responsable: tx.responsable
                         });
                     }
@@ -2779,16 +2773,17 @@ app.get('/api/projects/:id/dashboard', async (req, res) => {
         });
 
         const vehTxs = await VehicleTransaction.find({ proyectoId: id }).populate('vehicleId');
-        let costoGasolina = 0;
+        let vehiculosAsignados = new Set();
 
         vehTxs.forEach(tx => {
-            if (tx.tipoMovimiento === 'Gasolina') {
-                costoGasolina += (tx.gasolinaMonto || 0);
+            if (tx.vehicleId) {
+                vehiculosAsignados.add(tx.vehicleId._id.toString());
+            }
+            if (tx.tipoMovimiento === 'Asignación' || tx.tipoMovimiento === 'Préstamo' || tx.tipoMovimiento === 'Salida') {
                 desglose.push({
                     fecha: tx.fecha,
-                    tipo: 'Gasolina',
-                    descripcion: `Carga a ${tx.vehicleId ? tx.vehicleId.marca + ' ' + tx.vehicleId.modelo : 'Vehículo'}`,
-                    monto: tx.gasolinaMonto || 0,
+                    tipo: 'Vehículo',
+                    descripcion: `Asignación: ${tx.vehicleId ? tx.vehicleId.marca + ' ' + tx.vehicleId.modelo : 'Vehículo'}`,
                     responsable: tx.userName || tx.responsable || 'Desconocido'
                 });
             }
@@ -2799,10 +2794,9 @@ app.get('/api/projects/:id/dashboard', async (req, res) => {
         res.json({
             project: { ...project.toObject(), id: project._id.toString() },
             metrics: {
-                presupuestoEstimado: project.presupuestoEstimado || 0,
-                costoInsumos,
-                costoGasolina,
-                herramientasAsignadas: Math.max(0, herramientasAsignadas)
+                insumosConsumidos: Math.max(0, insumosConsumidos),
+                herramientasAsignadas: Math.max(0, herramientasAsignadas),
+                vehiculosAsignados: vehiculosAsignados.size
             },
             desglose
         });
