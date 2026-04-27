@@ -1339,7 +1339,8 @@ app.post('/api/personal-equipment', async (req, res) => {
         // Notificar al usuario
         notifyUser(userId, {
             title: "Nueva Asignación de Equipo",
-            body: `Se te ha asignado: ${equipmentName}. Por favor, entrá a la aplicación para firmar de confirmación o rechazarlo.`
+            body: `Se te ha asignado: ${equipmentName}. Por favor, entrá a la aplicación para firmar de confirmación o rechazarlo.`,
+            data: { view: 'herramientas' }
         });
 
         const responseObj = { ...newEq.toObject(), id: newEq._id.toString() };
@@ -1368,7 +1369,8 @@ app.put('/api/personal-equipment/:id/status', async (req, res) => {
         if (estado === 'Rechazado') {
             notifyAdmins({
                 title: "Equipo Rechazado",
-                body: `${eq.userName} ha rechazado la asignación de: ${eq.equipmentName}`
+                body: `${eq.userName} ha rechazado la asignación de: ${eq.equipmentName}`,
+                data: { view: 'adminEquipment' }
             });
         }
 
@@ -1400,7 +1402,8 @@ app.put('/api/personal-equipment/:id/missing', async (req, res) => {
         if (isMissing) {
             notifyUser(eq.userId, {
                 title: "Atención: Elemento Faltante",
-                body: `Se reportó como faltante tu equipo: ${eq.equipmentName} durante una revisión.`
+                body: `Se reportó como faltante tu equipo: ${eq.equipmentName} durante una revisión.`,
+                data: { view: 'herramientas' }
             });
         }
 
@@ -1733,7 +1736,8 @@ app.post('/api/vehicles/:id/loan', async (req, res) => {
         if (userId !== 'EXTERNO') {
             notifyUserByName(userName, {
                 title: "Vehículo Asignado",
-                body: `Se te ha asignado un vehículo. Por favor, abre la app para firmar de conformidad.`
+                body: `Se te ha asignado un vehículo. Por favor, abre la app para firmar de conformidad.`,
+                data: { view: 'herramientas' }
             });
         }
 
@@ -1778,7 +1782,8 @@ app.post('/api/vehicles/:id/return', async (req, res) => {
         if (userId !== 'EXTERNO') {
             notifyUser(userId, {
                 title: "Vehículo Devuelto",
-                body: `Tu devolución del vehículo ${vehicle.marca} ha sido confirmada en almacén.`
+                body: `Tu devolución del vehículo ${vehicle.marca} ha sido confirmada en almacén.`,
+                data: { view: 'herramientas' }
             });
         }
 
@@ -1814,7 +1819,8 @@ app.post('/api/vehicles/:id/gasoline', async (req, res) => {
         notifyAdmins({
             title: "Nuevo Ticket de Gasolina",
             body: `${userName} ha registrado una carga de gasolina por $${gasolinaMonto} para el vehículo ${vehicle.placas}.`,
-            icon: "/icon.png"
+            icon: "/icon.png",
+            data: { view: 'adminTracking' }
         }).catch(e => console.error('Push notification error:', e));
 
         res.status(200).json({ message: 'Gasolina registrada exitosamente.' });
@@ -2068,7 +2074,8 @@ app.post('/api/ticket/single/:id/sign', async (req, res) => {
 
         notifyAdmins({
             title: "Entregable Firmado",
-            body: `El cliente ${nombreCliente} ha firmado el Entregable / Ticket con folio ${ticket.folio || ticketId}.`
+            body: `El cliente ${nombreCliente} ha firmado el Entregable / Ticket con folio ${ticket.folio || ticketId}.`,
+            data: { view: 'adminTickets' }
         });
 
         res.json({ message: 'Firma guardada correctamente' });
@@ -2307,7 +2314,8 @@ app.post('/api/checkin', async (req, res) => {
         if (typeof notifyUser === 'function') {
             notifyUser(userId, {
                 title: `Checador: ${tipo} Registrada`,
-                body: `Se ha registrado tu ${tipo.toLowerCase()} a las ${new Date().toLocaleTimeString('es-MX', { timeZone: 'America/Mexico_City', hour: '2-digit', minute: '2-digit' })}.`
+                body: `Se ha registrado tu ${tipo.toLowerCase()} a las ${new Date().toLocaleTimeString('es-MX', { timeZone: 'America/Mexico_City', hour: '2-digit', minute: '2-digit' })}.`,
+                data: { view: 'perfil' }
             });
         }
 
@@ -2357,7 +2365,8 @@ app.post('/api/face-checkin', async (req, res) => {
         if (typeof notifyUser === 'function') {
             notifyUser(userId, {
                 title: `Checador Facial: ${tipo} Registrada`,
-                body: `Se ha registrado tu ${tipo.toLowerCase()} a las ${new Date().toLocaleTimeString('es-MX', { timeZone: 'America/Mexico_City', hour: '2-digit', minute: '2-digit' })} por la cámara IP.`
+                body: `Se ha registrado tu ${tipo.toLowerCase()} a las ${new Date().toLocaleTimeString('es-MX', { timeZone: 'America/Mexico_City', hour: '2-digit', minute: '2-digit' })} por la cámara IP.`,
+                data: { view: 'perfil' }
             });
         }
 
@@ -2556,7 +2565,8 @@ app.post('/api/vacations', async (req, res) => {
 
         notifyAdmins({
             title: "Nueva Solicitud de Vacaciones",
-            body: `${userName} ha solicitado ${diasSolicitados} días libres.`
+            body: `${userName} ha solicitado ${diasSolicitados} días libres.`,
+            data: { view: 'adminVacations' }
         });
 
         res.status(201).json(newRequest);
@@ -2700,7 +2710,8 @@ app.put('/api/vacations/:id/status', async (req, res) => {
 
         notifyUser(request.userId, {
             title: "Actualización de Solicitud",
-            body: `Tu solicitud de vacaciones ha sido ${estado.toUpperCase()}.`
+            body: `Tu solicitud de vacaciones ha sido ${estado.toUpperCase()}.`,
+            data: { view: 'perfil' }
         });
 
         res.json(request);
@@ -3554,12 +3565,14 @@ app.post('/api/inventory/transaction', async (req, res) => {
         if (tipoMovimiento === 'Salida' && needsConfirmation) {
             notifyUserByName(responsable, {
                 title: "Asignación de Inventario",
-                body: `Se te han pre-asignado herramientas. Abre la app para firmar de conformidad.`
+                body: `Se te han pre-asignado herramientas. Abre la app para firmar de conformidad.`,
+                data: { view: 'herramientas' }
             });
         } else {
             notifyUserByName(responsable, {
                 title: "Devolución de Inventario",
-                body: `Se ha confirmado exitosamente la devolución de tus herramientas o insumos.`
+                body: `Se ha confirmado exitosamente la devolución de tus herramientas o insumos.`,
+                data: { view: 'herramientas' }
             });
         }
 
@@ -3654,7 +3667,11 @@ app.put('/api/assignments/:type/:id/reject', async (req, res) => {
             await tx.save();
             io.emit('inventory_transactions_updated', { responsable: tx.responsable });
 
-            notifyAdmins({ title: "Asignación Rechazada", body: `${tx.responsable} rechazó la asignación de ${item ? item.nombre : 'un ítem'}.` });
+            notifyAdmins({ 
+                title: "Asignación Rechazada", 
+                body: `${tx.responsable} rechazó la asignación de ${item ? item.nombre : 'un ítem'}.`, 
+                data: { view: 'adminInventory' } 
+            });
             res.json({ success: true });
         } else if (req.params.type === 'vehicle') {
             const tx = await VehicleTransaction.findById(req.params.id);
@@ -3670,7 +3687,11 @@ app.put('/api/assignments/:type/:id/reject', async (req, res) => {
                 v.currentUserName = null;
                 await v.save();
                 io.emit('vehicle_updated', v);
-                notifyAdmins({ title: "Vehículo Rechazado", body: `${tx.userName} rechazó la asignación de ${v.marca} ${v.modelo}.` });
+                notifyAdmins({ 
+                    title: "Vehículo Rechazado", 
+                    body: `${tx.userName} rechazó la asignación de ${v.marca} ${v.modelo}.`, 
+                    data: { view: 'adminTracking' } 
+                });
             }
             res.json({ success: true });
         } else {
