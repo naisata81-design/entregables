@@ -2855,7 +2855,8 @@ app.post('/api/projects', async (req, res) => {
 
         notifyAll({
             title: "Nuevo Proyecto Abierto",
-            body: `Se ha abierto un nuevo proyecto/obra: ${nombre}.`
+            body: `Se ha abierto un nuevo proyecto/obra: ${nombre}.`,
+            data: { view: 'adminProjects' } // Or whatever the view name is for projects
         });
 
         res.status(201).json(responseObj);
