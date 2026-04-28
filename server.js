@@ -315,6 +315,23 @@ const PlanMarkerSchema = new mongoose.Schema({
 }, { timestamps: true });
 const PlanMarker = mongoose.model('PlanMarker', PlanMarkerSchema);
 
+const InternalMessageSchema = new mongoose.Schema({
+    senderId: { type: String, required: true },
+    senderName: { type: String, required: true },
+    receiverId: { type: String, required: true },
+    receiverName: { type: String, required: true },
+    subject: { type: String, default: 'Sin Asunto' },
+    body: { type: String, default: '' },
+    status: { type: String, enum: ['borrador', 'enviado'], default: 'enviado' },
+    isRead: { type: Boolean, default: false },
+    attachments: [{
+        nombre: String,
+        url: String, // Base64
+        tipo: String // 'image/png', 'application/pdf', etc.
+    }]
+}, { timestamps: true });
+const InternalMessage = mongoose.model('InternalMessage', InternalMessageSchema);
+
 const InventoryItemSchema = new mongoose.Schema({
     cantidadEnStock: { type: Number, default: 0 },
     unidad: { type: String, enum: ['piezas', 'metros'], default: 'piezas' },
@@ -3967,6 +3984,75 @@ app.post('/api/face-checkin', async (req, res) => {
     } catch (e) {
         console.error('Error procesando Face CheckIn:', e);
         res.status(500).json({ error: 'Error del servidor procesando asistencia facial' });
+    }
+});
+
+// --- Internal Mail API (Mensajería Naisata) ---
+app.post('/api/mail', async (req, res) => {
+    try {
+        const { senderId, senderName, receiverId, receiverName, subject, body, status, attachments } = req.body;
+        const msg = new InternalMessage({
+            senderId, senderName, receiverId, receiverName, subject, body, status, attachments
+        });
+        await msg.save();
+        res.status(201).json(msg);
+    } catch (e) {
+        res.status(500).json({ error: 'Error al enviar/guardar correo.' });
+    }
+});
+
+app.put('/api/mail/:id', async (req, res) => {
+    try {
+        const msg = await InternalMessage.findByIdAndUpdate(req.params.id, req.body, { new: true });
+        if (!msg) return res.status(404).json({ error: 'Mensaje no encontrado' });
+        res.json(msg);
+    } catch (e) {
+        res.status(500).json({ error: 'Error al actualizar el mensaje.' });
+    }
+});
+
+app.get('/api/mail/inbox/:userId', async (req, res) => {
+    try {
+        const msgs = await InternalMessage.find({ receiverId: req.params.userId, status: 'enviado' }).sort({ createdAt: -1 });
+        res.json(msgs);
+    } catch (e) {
+        res.status(500).json({ error: 'Error al cargar bandeja de entrada.' });
+    }
+});
+
+app.get('/api/mail/sent/:userId', async (req, res) => {
+    try {
+        const msgs = await InternalMessage.find({ senderId: req.params.userId, status: 'enviado' }).sort({ createdAt: -1 });
+        res.json(msgs);
+    } catch (e) {
+        res.status(500).json({ error: 'Error al cargar correos enviados.' });
+    }
+});
+
+app.get('/api/mail/drafts/:userId', async (req, res) => {
+    try {
+        const msgs = await InternalMessage.find({ senderId: req.params.userId, status: 'borrador' }).sort({ createdAt: -1 });
+        res.json(msgs);
+    } catch (e) {
+        res.status(500).json({ error: 'Error al cargar borradores.' });
+    }
+});
+
+app.put('/api/mail/:id/read', async (req, res) => {
+    try {
+        const msg = await InternalMessage.findByIdAndUpdate(req.params.id, { isRead: true }, { new: true });
+        res.json(msg);
+    } catch (e) {
+        res.status(500).json({ error: 'Error al marcar como leído.' });
+    }
+});
+
+app.delete('/api/mail/:id', async (req, res) => {
+    try {
+        await InternalMessage.findByIdAndDelete(req.params.id);
+        res.json({ message: 'Mensaje eliminado.' });
+    } catch (e) {
+        res.status(500).json({ error: 'Error al eliminar el mensaje.' });
     }
 });
 
