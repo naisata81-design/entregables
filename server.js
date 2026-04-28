@@ -3675,7 +3675,11 @@ app.get('/api/assignments/pending/:userId', async (req, res) => {
     try {
         const user = await User.findById(req.params.userId);
         if (!user) return res.status(404).json({ error: 'No user' });
-        const fullName = `${user.nombre} ${user.apellido}`;
+        const nombreLimpio = user.nombre ? user.nombre.trim() : '';
+        const apellidoLimpio = user.apellido ? user.apellido.trim() : '';
+        const fullName = `${nombreLimpio} ${apellidoLimpio}`.trim();
+        const nameVariations = [fullName, nombreLimpio, `${nombreLimpio} `, `${nombreLimpio} undefined`];
+        const respQuery = { $in: nameVariations.map(s => new RegExp(`^${s}`, 'i')) };
 
         const pendingInventory = await InventoryTransaction.find({
             responsable: {
@@ -4345,21 +4349,26 @@ setInterval(() => {
 // --- Flespi GPS Webhook ---
 app.post('/api/flespi/webhook', async (req, res) => {
     try {
-        const data = req.body;
+        let data = req.body;
         console.log('[FLESPI WEBHOOK] Received payload:', JSON.stringify(data).substring(0, 500));
+        if (!Array.isArray(data)) {
+            data = [data]; // Si Flespi manda un solo objeto en vez de arreglo
+        }
         if (Array.isArray(data)) {
             for (let msg of data) {
                 const imei = msg.ident;
                 const lat = msg['position.latitude'];
                 const lng = msg['position.longitude'];
                 const speed = msg['position.speed'] || 0;
+                const direction = msg['position.direction'] || 0;
+                const ignition = msg['engine.ignition.status'] !== undefined ? msg['engine.ignition.status'] : (speed > 0);
                 const timestamp = msg.timestamp ? new Date(msg.timestamp * 1000) : new Date();
                 
                 if (imei && lat !== undefined && lng !== undefined) {
                     const vehicle = await Vehicle.findOne({ imei: String(imei) });
                     if (vehicle) {
                         console.log(`[FLESPI WEBHOOK] Match found for IMEI ${imei}. Updating location...`);
-                        const newLoc = { lat, lng, speed, timestamp };
+                        const newLoc = { lat, lng, speed, direction, ignition, timestamp };
                         vehicle.lastLocation = newLoc;
                         
                         if (!vehicle.locationHistory) {
@@ -4374,7 +4383,7 @@ app.post('/api/flespi/webhook', async (req, res) => {
                         await vehicle.save();
                         io.emit('vehicle_location_update', {
                             vehicleId: vehicle._id,
-                            imei, lat, lng, speed, timestamp,
+                            imei, lat, lng, speed, direction, ignition, timestamp,
                             route: vehicle.locationHistory
                         });
                     } else {
