@@ -434,7 +434,8 @@ const VehicleSchema = new mongoose.Schema({
     vencimientoSeguro: { type: Date, default: null },
     vencimientoVerificacion: { type: Date, default: null },
     imei: { type: String, default: '' },
-    lastLocation: { type: Object, default: null }
+    lastLocation: { type: Object, default: null },
+    locationHistory: { type: [Object], default: [] }
 }, { timestamps: true });
 const Vehicle = mongoose.model('Vehicle', VehicleSchema);
 
@@ -4356,11 +4357,23 @@ app.post('/api/flespi/webhook', async (req, res) => {
                 if (imei && lat !== undefined && lng !== undefined) {
                     const vehicle = await Vehicle.findOne({ imei: imei });
                     if (vehicle) {
-                        vehicle.lastLocation = { lat, lng, speed, timestamp };
+                        const newLoc = { lat, lng, speed, timestamp };
+                        vehicle.lastLocation = newLoc;
+                        
+                        if (!vehicle.locationHistory) {
+                            vehicle.locationHistory = [];
+                        }
+                        vehicle.locationHistory.push(newLoc);
+                        // Limit to last 100 points for the route
+                        if (vehicle.locationHistory.length > 100) {
+                            vehicle.locationHistory = vehicle.locationHistory.slice(-100);
+                        }
+                        
                         await vehicle.save();
                         io.emit('vehicle_location_update', {
                             vehicleId: vehicle._id,
-                            imei, lat, lng, speed, timestamp
+                            imei, lat, lng, speed, timestamp,
+                            route: vehicle.locationHistory
                         });
                     }
                 }
