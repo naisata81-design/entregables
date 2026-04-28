@@ -432,7 +432,9 @@ const VehicleSchema = new mongoose.Schema({
     kilometrajeActual: { type: Number, default: 0 },
     proximoServicioKm: { type: Number, default: 10000 },
     vencimientoSeguro: { type: Date, default: null },
-    vencimientoVerificacion: { type: Date, default: null }
+    vencimientoVerificacion: { type: Date, default: null },
+    imei: { type: String, default: '' },
+    lastLocation: { type: Object, default: null }
 }, { timestamps: true });
 const Vehicle = mongoose.model('Vehicle', VehicleSchema);
 
@@ -4338,6 +4340,38 @@ setInterval(() => {
         runCronRoutine();
     }
 }, 60000);
+
+// --- Flespi GPS Webhook ---
+app.post('/api/flespi/webhook', async (req, res) => {
+    try {
+        const data = req.body;
+        if (Array.isArray(data)) {
+            for (let msg of data) {
+                const imei = msg.ident;
+                const lat = msg['position.latitude'];
+                const lng = msg['position.longitude'];
+                const speed = msg['position.speed'] || 0;
+                const timestamp = msg.timestamp ? new Date(msg.timestamp * 1000) : new Date();
+                
+                if (imei && lat !== undefined && lng !== undefined) {
+                    const vehicle = await Vehicle.findOne({ imei: imei });
+                    if (vehicle) {
+                        vehicle.lastLocation = { lat, lng, speed, timestamp };
+                        await vehicle.save();
+                        io.emit('vehicle_location_update', {
+                            vehicleId: vehicle._id,
+                            imei, lat, lng, speed, timestamp
+                        });
+                    }
+                }
+            }
+        }
+        res.status(200).send('OK');
+    } catch(e) {
+        console.error('Flespi webhook error:', e);
+        res.status(500).send('Error');
+    }
+});
 
 app.post('/api/it/broadcast', async (req, res) => {
     try {
