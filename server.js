@@ -84,7 +84,7 @@ const UserSchema = new mongoose.Schema({
     fotoPerfil: { type: String, default: '' },
     terminosAceptados: { type: Boolean, default: false },
     evidenciaTerminos: { type: String, default: '' },
-    estadoCuenta: { type: String, enum: ['pendiente', 'activa', 'rechazada'] },
+    estadoCuenta: { type: String, enum: ['pendiente', 'activa', 'rechazada', 'inactiva'] },
     numeroEmpleado: { type: Number, unique: true, sparse: true },
     faceDescriptor: { type: [Number], default: [] },
     rfc: { type: String, default: '' },
@@ -285,6 +285,7 @@ const CheckIn = mongoose.model('CheckIn', CheckInSchema);
 const VacationRequest = mongoose.model('VacationRequest', VacationRequestSchema);
 
 const ProjectSchema = new mongoose.Schema({
+    tipo: { type: String, enum: ['General', 'Cableado'], default: 'General' },
     nombre: String,
     descripcion: String,
     clienteId: String,
@@ -1264,6 +1265,22 @@ app.put('/api/users/:id/profile-extended', async (req, res) => {
 
         await user.save();
         res.json({ success: true, user });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Desactivar Empleado (Dar de baja)
+app.put('/api/users/:id/deactivate', async (req, res) => {
+    try {
+        const user = await User.findById(req.params.id);
+        if (!user) return res.status(404).json({ error: 'User not found' });
+        
+        // Toggle between activa and inactiva
+        user.estadoCuenta = user.estadoCuenta === 'activa' ? 'inactiva' : 'activa';
+        await user.save();
+        
+        res.json({ success: true, estadoCuenta: user.estadoCuenta });
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
@@ -2735,11 +2752,42 @@ app.delete('/api/vacations/:id', async (req, res) => {
     }
 });
 
+app.put('/api/vacations/:id/revert', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const request = await VacationRequest.findById(id);
+        if (!request) return res.status(404).json({ error: 'Solicitud no encontrada.' });
+
+        if (request.estado === 'aprobada') {
+            // Refund days if it was approved
+            const user = await User.findById(request.userId);
+            if (user) {
+                user.diasVacacionesDisponibles = (user.diasVacacionesDisponibles || 0) + request.diasSolicitados;
+                await user.save();
+            }
+        }
+        
+        request.estado = 'pendiente';
+        await request.save();
+        
+        res.json({ success: true, request });
+    } catch (e) {
+        res.status(500).json({ error: 'Error al revertir la solicitud.' });
+    }
+});
+
 
 // --- Interactive Plans & Markers ---
 app.get('/api/projects', async (req, res) => {
     try {
-        const projects = await ProjectModel.find().sort({ createdAt: -1 });
+        const { tipo } = req.query;
+        let filter = {};
+        if (tipo === 'General') {
+            filter = { $or: [{ tipo: 'General' }, { tipo: { $exists: false } }] };
+        } else if (tipo) {
+            filter = { tipo };
+        }
+        const projects = await ProjectModel.find(filter).sort({ createdAt: -1 });
         const mapped = projects.map(p => ({ ...p.toObject(), id: p._id.toString() }));
         res.json(mapped);
     } catch (e) {
@@ -2850,10 +2898,11 @@ app.get('/api/projects/:id/dashboard', async (req, res) => {
 
 app.post('/api/projects', async (req, res) => {
     try {
-        const { nombre, descripcion, clienteId, presupuestoMateriales, presupuestoEstimado, estado, residenteId, ubicacion } = req.body;
+        const { tipo, nombre, descripcion, clienteId, presupuestoMateriales, presupuestoEstimado, estado, residenteId, ubicacion } = req.body;
         if (!nombre) return res.status(400).json({ error: 'El nombre es obligatorio.' });
 
         const newProject = new ProjectModel({
+            tipo: tipo || 'General',
             nombre,
             descripcion,
             clienteId,
