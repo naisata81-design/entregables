@@ -2720,6 +2720,21 @@ app.put('/api/vacations/:id/status', async (req, res) => {
     }
 });
 
+app.delete('/api/vacations/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const request = await VacationRequest.findById(id);
+        if (!request) return res.status(404).json({ error: 'Solicitud no encontrada.' });
+        if (request.estado !== 'pendiente') {
+            return res.status(400).json({ error: 'Solo se pueden eliminar solicitudes pendientes.' });
+        }
+        await VacationRequest.findByIdAndDelete(id);
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: 'Error al eliminar la solicitud.' });
+    }
+});
+
 
 // --- Interactive Plans & Markers ---
 app.get('/api/projects', async (req, res) => {
