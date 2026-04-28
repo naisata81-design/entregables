@@ -1712,10 +1712,10 @@ app.get('/api/vehicles/:id/last-loan', async (req, res) => {
 
 app.post('/api/vehicles', async (req, res) => {
     try {
-        const { marca, modelo, color, placas, bitacoraEsperada, equipmentPhotos, documentosVehiculo } = req.body;
+        const { marca, modelo, color, placas, bitacoraEsperada, equipmentPhotos, documentosVehiculo, imei } = req.body;
         if (!marca || !modelo || !placas) return res.status(400).json({ error: 'Marca, modelo y placas son obligatorios.' });
 
-        const newVehicle = new Vehicle({ marca, modelo, color, placas, bitacoraEsperada, equipmentPhotos, documentosVehiculo });
+        const newVehicle = new Vehicle({ marca, modelo, color, placas, bitacoraEsperada, equipmentPhotos, documentosVehiculo, imei });
         await newVehicle.save();
         res.status(201).json(newVehicle);
     } catch (e) {
