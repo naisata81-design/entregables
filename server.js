@@ -4346,6 +4346,7 @@ setInterval(() => {
 app.post('/api/flespi/webhook', async (req, res) => {
     try {
         const data = req.body;
+        console.log('[FLESPI WEBHOOK] Received payload:', JSON.stringify(data).substring(0, 500));
         if (Array.isArray(data)) {
             for (let msg of data) {
                 const imei = msg.ident;
@@ -4355,8 +4356,9 @@ app.post('/api/flespi/webhook', async (req, res) => {
                 const timestamp = msg.timestamp ? new Date(msg.timestamp * 1000) : new Date();
                 
                 if (imei && lat !== undefined && lng !== undefined) {
-                    const vehicle = await Vehicle.findOne({ imei: imei });
+                    const vehicle = await Vehicle.findOne({ imei: String(imei) });
                     if (vehicle) {
+                        console.log(`[FLESPI WEBHOOK] Match found for IMEI ${imei}. Updating location...`);
                         const newLoc = { lat, lng, speed, timestamp };
                         vehicle.lastLocation = newLoc;
                         
@@ -4375,9 +4377,15 @@ app.post('/api/flespi/webhook', async (req, res) => {
                             imei, lat, lng, speed, timestamp,
                             route: vehicle.locationHistory
                         });
+                    } else {
+                        console.log(`[FLESPI WEBHOOK] WARNING: Received data for IMEI ${imei} but no vehicle was found in DB with this IMEI!`);
                     }
+                } else {
+                    console.log(`[FLESPI WEBHOOK] Skipping message: missing imei, lat, or lng. IMEI: ${imei}, LAT: ${lat}, LNG: ${lng}`);
                 }
             }
+        } else {
+            console.log('[FLESPI WEBHOOK] Payload is not an array.');
         }
         res.status(200).send('OK');
     } catch(e) {
