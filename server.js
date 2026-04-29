@@ -429,11 +429,13 @@ const VehicleSchema = new mongoose.Schema({
     lastDamageReport: { type: String, default: '' },
     currentUserId: { type: String, default: null },
     currentUserName: { type: String, default: null },
+    encendido: { type: Boolean, default: false },
     kilometrajeActual: { type: Number, default: 0 },
     proximoServicioKm: { type: Number, default: 10000 },
     vencimientoSeguro: { type: Date, default: null },
     vencimientoVerificacion: { type: Date, default: null },
     imei: { type: String, default: '' },
+    flespiId: { type: String, default: '' },
     lastLocation: { type: Object, default: null },
     locationHistory: { type: [Object], default: [] }
 }, { timestamps: true });
@@ -1754,6 +1756,7 @@ app.post('/api/vehicles/:id/loan', async (req, res) => {
         vehicle.estado = 'Pendiente de Confirmación';
         vehicle.currentUserId = userId;
         vehicle.currentUserName = userName;
+        vehicle.encendido = false;
         await vehicle.save();
 
         const tx = new VehicleTransaction({
@@ -1829,6 +1832,85 @@ app.post('/api/vehicles/:id/return', async (req, res) => {
         res.status(200).json({ message: 'Vehículo devuelto exitosamente.', transaction: tx });
     } catch (e) {
         res.status(500).json({ error: 'Error interno devolviendo.' });
+    }
+});
+
+
+const FLESPI_TOKEN = 'Qqi7VDdykJoQReAknMS789MLbpQeaKsMRknibI6vVa75sqfx6XIcRp0Vo8xzUovd';
+
+async function sendFlespiCommand(flespiId, action) {
+    if (!flespiId) return;
+    try {
+        // action === 'off' -> apagar motor -> setdigout 1 (activa relevador de corte)
+        // action === 'on' -> encender motor -> setdigout 0 (desactiva relevador de corte)
+        const customPayload = action === 'off' ? 'setdigout 1' : 'setdigout 0';
+        
+        const payload = [{
+            "name": "custom",
+            "properties": {
+                "payload": customPayload
+            }
+        }];
+
+        const response = await fetch(`https://flespi.io/gw/devices/${flespiId}/commands`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `FlespiToken ${FLESPI_TOKEN}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
+        
+        const data = await response.json();
+        console.log(`[FLESPI] Custom command '${customPayload}' sent to device ${flespiId}. Response:`, data);
+        
+        // Si por alguna razón el dispositivo no soporta "custom", intentamos el fallback genérico "output_control"
+        if (data && data.errors && data.errors.length > 0) {
+             console.log('[FLESPI] Fallback to output_control...');
+             const fallbackPayload = [{
+                 "name": "output_control",
+                 "properties": { "index": 1, "value": action === 'off' ? 1 : 0 }
+             }];
+             await fetch(`https://flespi.io/gw/devices/${flespiId}/commands`, {
+                method: 'POST',
+                headers: { 'Authorization': `FlespiToken ${FLESPI_TOKEN}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify(fallbackPayload)
+             });
+        }
+    } catch (e) {
+        console.error('[FLESPI] Error sending command:', e);
+    }
+}
+
+app.post('/api/vehicles/:id/engine', async (req, res) => {
+    try {
+        const { action } = req.body;
+        const vehicle = await Vehicle.findById(req.params.id);
+        if (!vehicle) return res.status(404).json({ error: 'Vehículo no encontrado.' });
+
+        if (action === 'on') {
+            if (vehicle.estado === 'Pendiente de Confirmación') {
+                return res.status(400).json({ error: 'Debes aceptar la asignación del vehículo antes de poder encenderlo.' });
+            }
+            vehicle.encendido = true;
+        } else {
+            vehicle.encendido = false;
+        }
+        
+        // Send actual physical command to GPS
+        if (vehicle.flespiId) {
+            await sendFlespiCommand(vehicle.flespiId, vehicle.encendido ? 'on' : 'off');
+        }
+
+        await vehicle.save();
+        
+        if (typeof io !== 'undefined') {
+            io.emit('vehicle_updated', vehicle);
+        }
+
+        res.status(200).json({ message: vehicle.encendido ? 'Motor encendido.' : 'Motor apagado.', encendido: vehicle.encendido });
+    } catch (e) {
+        res.status(500).json({ error: 'Error interno cambiando estado del motor.' });
     }
 });
 
