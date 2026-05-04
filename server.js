@@ -2110,6 +2110,22 @@ app.get('/api/vehicle-transaction/:id/photos', async (req, res) => {
     }
 });
 
+app.get('/api/vehicle-transactions/all', async (req, res) => {
+    try {
+        const oneYearAgo = new Date();
+        oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+        
+        const txs = await VehicleTransaction.find({
+            fecha: { $gte: oneYearAgo },
+            tipoMovimiento: { $in: ['Préstamo', 'Devolución', 'Devolucion', 'Salida'] }
+        }).select('vehicleId userId userName tipoMovimiento fecha').sort({ fecha: -1 }).populate('vehicleId', 'marca modelo placas color');
+        
+        res.json({ history: txs });
+    } catch (e) {
+        res.status(500).json({ error: 'Error obteniendo historial general.' });
+    }
+});
+
 // 3. Sitios (Sites)
 app.get('/api/sites', async (req, res) => {
     try {
