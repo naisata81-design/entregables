@@ -2118,7 +2118,7 @@ app.get('/api/vehicle-transactions/all', async (req, res) => {
         const txs = await VehicleTransaction.find({
             fecha: { $gte: oneYearAgo },
             tipoMovimiento: { $in: ['Préstamo', 'Devolución', 'Devolucion', 'Salida'] }
-        }).select('vehicleId userId userName tipoMovimiento fecha').sort({ fecha: -1 }).populate('vehicleId', 'marca modelo placas color');
+        }).select('-firma -firmaUsuario -gasolinaFoto -imgReporteDanos').sort({ fecha: -1 }).populate('vehicleId', 'marca modelo placas color');
         
         res.json({ history: txs });
     } catch (e) {
