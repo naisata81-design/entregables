@@ -449,6 +449,13 @@ const VehicleRoutePointSchema = new mongoose.Schema({
     lng: Number,
     speed: Number,
     ignition: Boolean,
+    engineRPM: Number,
+    batteryVoltage: Number,
+    externalVoltage: Number,
+    fuelLevel: Number,
+    engineTemp: Number,
+    mileage: Number,
+    dtcCount: Number,
     timestamp: { type: Date, default: Date.now, expires: '7d' }
 });
 const VehicleRoutePoint = mongoose.model('VehicleRoutePoint', VehicleRoutePointSchema);
@@ -1322,11 +1329,11 @@ app.put('/api/users/:id/deactivate', async (req, res) => {
     try {
         const user = await User.findById(req.params.id);
         if (!user) return res.status(404).json({ error: 'User not found' });
-        
+
         // Toggle between activa and inactiva
         user.estadoCuenta = user.estadoCuenta === 'activa' ? 'inactiva' : 'activa';
         await user.save();
-        
+
         res.json({ success: true, estadoCuenta: user.estadoCuenta });
     } catch (e) {
         res.status(500).json({ error: e.message });
@@ -1884,7 +1891,7 @@ async function sendFlespiCommand(flespiId, action) {
         // action === 'off' -> apagar motor -> "setdigout 0"
         // action === 'on' -> encender motor -> "setdigout 1"
         const cmdText = action === 'off' ? 'setdigout 0' : 'setdigout 1';
-        
+
         const payload = [{
             "name": "custom",
             "max_attempts": 3,
@@ -1902,10 +1909,10 @@ async function sendFlespiCommand(flespiId, action) {
             },
             body: JSON.stringify(payload)
         });
-        
+
         const data = await response.json();
         console.log(`[FLESPI] 'setdigout' (value: ${action === 'off'}) sent to device ${flespiId} via commands-queue. Response:`, data);
-        
+
     } catch (e) {
         console.error('[FLESPI] Error sending command:', e);
     }
@@ -1949,14 +1956,14 @@ app.post('/api/vehicles/:id/engine', async (req, res) => {
             }
             vehicle.encendido = true;
         }
-        
+
         // Send actual physical command to GPS
         if (vehicle.flespiId) {
             await sendFlespiCommand(vehicle.flespiId, vehicle.encendido ? 'on' : 'off');
         }
 
         await vehicle.save();
-        
+
         if (typeof io !== 'undefined') {
             io.emit('vehicle_updated', vehicle);
         }
@@ -2114,12 +2121,12 @@ app.get('/api/vehicle-transactions/all', async (req, res) => {
     try {
         const oneYearAgo = new Date();
         oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
-        
+
         const txs = await VehicleTransaction.find({
             fecha: { $gte: oneYearAgo },
             tipoMovimiento: { $in: ['Préstamo', 'Devolución', 'Devolucion', 'Salida'] }
         }).select('-firma -firmaUsuario -gasolinaFoto -imgReporteDanos').sort({ fecha: -1 }).populate('vehicleId', 'marca modelo placas color');
-        
+
         res.json({ history: txs });
     } catch (e) {
         res.status(500).json({ error: 'Error obteniendo historial general.' });
@@ -2989,10 +2996,10 @@ app.put('/api/vacations/:id/revert', async (req, res) => {
                 await user.save();
             }
         }
-        
+
         request.estado = 'pendiente';
         await request.save();
-        
+
         res.json({ success: true, request });
     } catch (e) {
         res.status(500).json({ error: 'Error al revertir la solicitud.' });
@@ -3037,7 +3044,7 @@ app.get('/api/projects/:id/dashboard', async (req, res) => {
         if (!project) return res.status(404).json({ error: 'Proyecto no encontrado' });
 
         const invTxs = await InventoryTransaction.find({ proyectoId: id }).populate('itemId');
-        
+
         let insumosConsumidos = 0;
         let herramientasAsignadas = 0;
         const desglose = [];
@@ -3960,10 +3967,10 @@ app.put('/api/assignments/:type/:id/reject', async (req, res) => {
             await tx.save();
             io.emit('inventory_transactions_updated', { responsable: tx.responsable });
 
-            notifyAdmins({ 
-                title: "Asignación Rechazada", 
-                body: `${tx.responsable} rechazó la asignación de ${item ? item.nombre : 'un ítem'}.`, 
-                data: { view: 'adminInventory' } 
+            notifyAdmins({
+                title: "Asignación Rechazada",
+                body: `${tx.responsable} rechazó la asignación de ${item ? item.nombre : 'un ítem'}.`,
+                data: { view: 'adminInventory' }
             });
             res.json({ success: true });
         } else if (req.params.type === 'vehicle') {
@@ -3980,10 +3987,10 @@ app.put('/api/assignments/:type/:id/reject', async (req, res) => {
                 v.currentUserName = null;
                 await v.save();
                 io.emit('vehicle_updated', v);
-                notifyAdmins({ 
-                    title: "Vehículo Rechazado", 
-                    body: `${tx.userName} rechazó la asignación de ${v.marca} ${v.modelo}.`, 
-                    data: { view: 'adminTracking' } 
+                notifyAdmins({
+                    title: "Vehículo Rechazado",
+                    body: `${tx.userName} rechazó la asignación de ${v.marca} ${v.modelo}.`,
+                    data: { view: 'adminTracking' }
                 });
             }
             res.json({ success: true });
@@ -4573,17 +4580,27 @@ app.post('/api/flespi/webhook', async (req, res) => {
                 const speed = msg['position.speed'] || 0;
                 const direction = msg['position.direction'] || 0;
                 const ignition = msg['engine.ignition.status'] !== undefined ? msg['engine.ignition.status'] : (speed > 0);
-                const timestamp = msg.timestamp ? new Date(msg.timestamp * 1000) : new Date();
                 
+                // FMC003 OBD2 & GPS Parameters
+                const engineRPM = msg['can.engine.rpm'] || msg['obd.engine.rpm'] || 0;
+                const batteryVoltage = msg['battery.voltage'] || 0;
+                const externalVoltage = msg['external.powersource.voltage'] || msg['can.vehicle.battery.level'] || 0;
+                const fuelLevel = msg['can.fuel.level'] || msg['obd.fuel.level'] || 0;
+                const engineTemp = msg['can.engine.temperature'] || msg['obd.engine.temperature'] || 0;
+                const mileage = msg['can.vehicle.mileage'] || msg['obd.vehicle.mileage'] || 0;
+                const dtcCount = msg['can.dtc.count'] || msg['obd.dtc.count'] || 0;
+
+                const timestamp = msg.timestamp ? new Date(msg.timestamp * 1000) : new Date();
+
                 if (imei && lat !== undefined && lng !== undefined) {
                     const vehicle = await Vehicle.findOne({ imei: String(imei) });
                     if (vehicle) {
                         console.log(`[FLESPI WEBHOOK] Match found for IMEI ${imei}. Updating location...`);
-                        const newLoc = { lat, lng, speed, direction, ignition, timestamp };
-                        
+                        const newLoc = { lat, lng, speed, direction, ignition, engineRPM, batteryVoltage, externalVoltage, fuelLevel, engineTemp, mileage, dtcCount, timestamp, rawData: msg };
+
                         const wasMoving = vehicle.lastLocation ? (vehicle.lastLocation.speed > 0) : false;
                         const isMoving = speed > 0;
-                        
+
                         if (wasMoving && !isMoving) {
                             const stop = new VehicleStop({
                                 vehicleId: vehicle._id,
@@ -4605,12 +4622,12 @@ app.post('/api/flespi/webhook', async (req, res) => {
                         }
 
                         vehicle.lastLocation = newLoc;
-                        
+
                         VehicleRoutePoint.create({
                             vehicleId: vehicle._id,
-                            lat, lng, speed, ignition, timestamp
+                            lat, lng, speed, ignition, engineRPM, batteryVoltage, externalVoltage, fuelLevel, engineTemp, mileage, dtcCount, timestamp
                         }).catch(err => console.error('Error saving route point:', err));
-                        
+
                         if (!vehicle.locationHistory) {
                             vehicle.locationHistory = [];
                         }
@@ -4619,11 +4636,11 @@ app.post('/api/flespi/webhook', async (req, res) => {
                         if (vehicle.locationHistory.length > 100) {
                             vehicle.locationHistory = vehicle.locationHistory.slice(-100);
                         }
-                        
+
                         await vehicle.save();
                         io.emit('vehicle_location_update', {
                             vehicleId: vehicle._id,
-                            imei, lat, lng, speed, direction, ignition, timestamp,
+                            imei, lat, lng, speed, direction, ignition, engineRPM, batteryVoltage, externalVoltage, fuelLevel, engineTemp, mileage, dtcCount, timestamp, rawData: msg,
                             route: vehicle.locationHistory
                         });
                     } else {
@@ -4637,7 +4654,7 @@ app.post('/api/flespi/webhook', async (req, res) => {
             console.log('[FLESPI WEBHOOK] Payload is not an array.');
         }
         res.status(200).send('OK');
-    } catch(e) {
+    } catch (e) {
         console.error('Flespi webhook error:', e);
         res.status(500).send('Error');
     }
@@ -4664,4 +4681,3 @@ app.post('/api/it/simulate-cron', (req, res) => {
     }
 });
 // ---------------------------
-
