@@ -768,18 +768,22 @@ async function persistNotification(userId, payload) {
 
         if (numeros.length > 0) {
             const msjWhatsapp = `*${payload.title || 'Notificación NAIS'}*\n\n${payload.body || ''}`;
-            const fetchPromises = numeros.map(num => {
+            
+            // Enviar notificaciones de manera SECUENCIAL (uno por uno) para no saturar al bot de WhatsApp
+            for (const num of numeros) {
                 const telLimpio = num.replace(/\D/g, '');
                 if (telLimpio.length >= 10) {
-                    return fetch(`${crmUrl}/api/whatsapp/send`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ to: telLimpio, message: msjWhatsapp })
-                    }).catch(err => console.error('Error al notificar por WhatsApp a', telLimpio, err.message));
+                    try {
+                        await fetch(`${crmUrl}/api/whatsapp/send`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ to: telLimpio, message: msjWhatsapp })
+                        });
+                    } catch (err) {
+                        console.error('Error al notificar por WhatsApp a', telLimpio, err.message);
+                    }
                 }
-                return Promise.resolve();
-            });
-            await Promise.all(fetchPromises);
+            }
         }
     } catch (e) {
         console.error('Error guardando notificación en BD o enviando WA:', e);
@@ -3266,7 +3270,7 @@ app.post('/api/quotes', async (req, res) => {
 app.put('/api/quotes/:id/status', async (req, res) => {
     try {
         const { estado } = req.body;
-        const quote = await QuoteModel.findByIdAndUpdate(req.params.id, { estado }, { new: true });
+        const quote = await QuoteModel.findByIdAndUpdate(req.params.id, { estado }, { returnDocument: 'after' });
         res.json({ message: 'Estado actualizado', quote });
     } catch (e) {
         res.status(500).json({ error: 'Error actualizando estado' });
@@ -3469,7 +3473,7 @@ app.put('/api/projects/:id', async (req, res) => {
         const { id } = req.params;
         const updateData = req.body;
 
-        const updatedProject = await ProjectModel.findByIdAndUpdate(id, updateData, { new: true });
+        const updatedProject = await ProjectModel.findByIdAndUpdate(id, updateData, { returnDocument: 'after' });
         if (!updatedProject) return res.status(404).json({ error: 'Proyecto no encontrado.' });
 
         const responseObj = { ...updatedProject.toObject(), id: updatedProject._id.toString() };
@@ -4529,7 +4533,7 @@ app.post('/api/mail', async (req, res) => {
 
 app.put('/api/mail/:id', async (req, res) => {
     try {
-        const msg = await InternalMessage.findByIdAndUpdate(req.params.id, req.body, { new: true });
+        const msg = await InternalMessage.findByIdAndUpdate(req.params.id, req.body, { returnDocument: 'after' });
         if (!msg) return res.status(404).json({ error: 'Mensaje no encontrado' });
         res.json(msg);
     } catch (e) {
@@ -4566,7 +4570,7 @@ app.get('/api/mail/drafts/:userId', async (req, res) => {
 
 app.put('/api/mail/:id/read', async (req, res) => {
     try {
-        const msg = await InternalMessage.findByIdAndUpdate(req.params.id, { isRead: true }, { new: true });
+        const msg = await InternalMessage.findByIdAndUpdate(req.params.id, { isRead: true }, { returnDocument: 'after' });
         res.json(msg);
     } catch (e) {
         res.status(500).json({ error: 'Error al marcar como leído.' });
