@@ -4961,21 +4961,21 @@ app.put('/api/tracking/vehiculos/swap-crm', async (req, res) => {
         const db = mongoose.connection.db;
         
         await db.collection('crmactividads').updateOne(
-            { _id: new mongoose.Types.ObjectId(crmActividadId) },
+            { _id: crmActividadId },
             { $pull: { vehiculosAsignados: oldVehicleId } }
         );
         await db.collection('crmactividads').updateOne(
-            { _id: new mongoose.Types.ObjectId(crmActividadId) },
+            { _id: crmActividadId },
             { $addToSet: { vehiculosAsignados: newVehicleId } }
         );
 
-        if (proyectoId) {
+        if (proyectoId && proyectoId !== 'null') {
             await db.collection('crmproyectos').updateOne(
-                { _id: new mongoose.Types.ObjectId(proyectoId) },
+                { _id: proyectoId },
                 { $pull: { vehiculosAsignados: oldVehicleId } }
             );
             await db.collection('crmproyectos').updateOne(
-                { _id: new mongoose.Types.ObjectId(proyectoId) },
+                { _id: proyectoId },
                 { $addToSet: { vehiculosAsignados: newVehicleId } }
             );
         }
