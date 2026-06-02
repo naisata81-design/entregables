@@ -483,7 +483,9 @@ const VehicleSchema = new mongoose.Schema({
     lastLocation: { type: Object, default: null },
     locationHistory: { type: [Object], default: [] },
     currentStopId: { type: String, default: null },
-    destinoSugeridoCRM: { type: String, default: '' }
+    destinoSugeridoCRM: { type: String, default: '' },
+    crmActividadId: { type: String, default: null },
+    crmProyectoId: { type: String, default: null }
 }, { timestamps: true });
 const Vehicle = mongoose.model('Vehicle', VehicleSchema);
 
@@ -4927,3 +4929,60 @@ app.post('/api/it/simulate-cron', (req, res) => {
     }
 });
 // ---------------------------
+
+app.put('/api/tracking/vehiculos/swap-crm', async (req, res) => {
+    try {
+        const { oldVehicleId, newVehicleId, crmActividadId } = req.body;
+        if (!oldVehicleId || !newVehicleId || !crmActividadId) {
+            return res.status(400).json({ error: 'Faltan parámetros' });
+        }
+
+        const oldVehicle = await Vehicle.findById(oldVehicleId);
+        if (!oldVehicle) return res.status(404).json({ error: 'Vehículo original no encontrado' });
+
+        const label = oldVehicle.destinoSugeridoCRM;
+        const proyectoId = oldVehicle.crmProyectoId;
+
+        // Liberar carro original
+        oldVehicle.destinoSugeridoCRM = '';
+        oldVehicle.crmActividadId = null;
+        oldVehicle.crmProyectoId = null;
+        await oldVehicle.save();
+
+        // Apartar carro nuevo
+        const newVehicle = await Vehicle.findById(newVehicleId);
+        if (!newVehicle) return res.status(404).json({ error: 'Vehículo nuevo no encontrado' });
+        newVehicle.destinoSugeridoCRM = label;
+        newVehicle.crmActividadId = crmActividadId;
+        newVehicle.crmProyectoId = proyectoId;
+        await newVehicle.save();
+
+        // Actualizar base de datos de CRM directamente
+        const db = mongoose.connection.db;
+        
+        await db.collection('crmactividads').updateOne(
+            { _id: new mongoose.Types.ObjectId(crmActividadId) },
+            { $pull: { vehiculosAsignados: oldVehicleId } }
+        );
+        await db.collection('crmactividads').updateOne(
+            { _id: new mongoose.Types.ObjectId(crmActividadId) },
+            { $addToSet: { vehiculosAsignados: newVehicleId } }
+        );
+
+        if (proyectoId) {
+            await db.collection('crmproyectos').updateOne(
+                { _id: new mongoose.Types.ObjectId(proyectoId) },
+                { $pull: { vehiculosAsignados: oldVehicleId } }
+            );
+            await db.collection('crmproyectos').updateOne(
+                { _id: new mongoose.Types.ObjectId(proyectoId) },
+                { $addToSet: { vehiculosAsignados: newVehicleId } }
+            );
+        }
+
+        res.json({ message: 'Vehículo reasignado con éxito', oldVehicle, newVehicle });
+    } catch (e) {
+        console.error('Error swap CRM vehiculo:', e);
+        res.status(500).json({ error: e.message });
+    }
+});
