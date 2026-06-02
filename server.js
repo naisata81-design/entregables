@@ -1025,12 +1025,16 @@ app.get('/api/users', async (req, res) => {
         const cached = AppCache.get('usersAdminList');
         if (cached) return res.json(cached);
 
-        const users = await User.find().select('-password -firma -faceDescriptor -fotoPerfil -evidenciaTerminos').sort({ createdAt: -1 });
+        // Fetch with faceDescriptor only to compute hasFace, then strip it before sending
+        const users = await User.find().select('-password -firma -fotoPerfil -evidenciaTerminos').sort({ createdAt: -1 });
         const usersData = [];
         for (const user of users) {
             const diasCalc = await calcularVacacionesDinamicamente(user);
             const userObj = user.toObject();
             userObj.diasVacacionesDisponibles = diasCalc;
+            // Add a safe boolean flag without sending the full descriptor
+            userObj.hasFace = !!(user.faceDescriptor && user.faceDescriptor.length > 0);
+            delete userObj.faceDescriptor; // Never expose descriptors via this endpoint
             usersData.push(userObj);
         }
         AppCache.set('usersAdminList', usersData, 5000); // 5 seconds TTL
