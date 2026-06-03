@@ -1936,10 +1936,14 @@ app.post('/api/vehicles/:id/loan', async (req, res) => {
             try {
                 const crmUrl = process.env.CRM_API_URL || 'https://crm-production-2af7.up.railway.app';
                 const DOMAIN = process.env.URL || 'https://naisa.newbox.mx';
-                // La variable `checklist` es un string (JSON) cuando se manda via FormData, intentamos parsearlo
+                // La variable `checklist` puede ser un string (FormData) o un objeto (JSON)
                 let parsedChecklist = null;
                 if (checklist) {
-                    try { parsedChecklist = JSON.parse(checklist); } catch (e) { console.error(e); if(typeof res !== 'undefined') { if(!res.headersSent) res.status(500).json({error: e.message}); } }
+                    try { 
+                        parsedChecklist = typeof checklist === 'string' ? JSON.parse(checklist) : checklist; 
+                    } catch (e) { 
+                        console.error("Error parseando checklist", e); 
+                    }
                 }
 
                 // Usamos `fetch` interno en vez del módulo no-declarado aquí
