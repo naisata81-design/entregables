@@ -2691,6 +2691,25 @@ app.put('/api/tickets/:id', upload.array('fotos', 15), async (req, res) => {
     }
 });
 
+app.post('/api/tickets/:id/clear-signature', async (req, res) => {
+    try {
+        const ticketId = req.params.id;
+        const ticket = await Ticket.findById(ticketId);
+        if (!ticket) return res.status(404).json({ error: 'Ticket no encontrado.' });
+
+        ticket.firmaCliente = null;
+        ticket.nombreCliente = null;
+        await ticket.save();
+
+        const responseObj = { ...ticket.toObject(), id: ticket._id.toString() };
+        io.emit('new_ticket', responseObj);
+        res.status(200).json({ message: 'Firma borrada con éxito' });
+    } catch (e) {
+        console.error('Error borrando firma del ticket:', e);
+        res.status(500).json({ error: 'Error interno borrando firma del ticket.' });
+    }
+});
+
 // Delete ticket
 app.delete('/api/tickets/:id', async (req, res) => {
     try {
