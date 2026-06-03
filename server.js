@@ -51,7 +51,7 @@ const storage = multer.memoryStorage();
 const upload = multer({ storage: storage, limits: { files: 15, fileSize: 15 * 1024 * 1024 } }); // 15MB max per file
 
 // --- MongoDB Config ---
-const MONGODB_URI = 'mongodb+srv://naisata:Hola2025@naisata.kwletg6.mongodb.net/naisata_db?retryWrites=true&w=majority&appName=naisata';
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://mongo:mJiHJrpYpovNfMvBBzfwiKpoBjYcPZLg@mongodb.railway.internal:27017/naisata_db?authSource=admin';
 
 mongoose.connect(MONGODB_URI, {
     serverSelectionTimeoutMS: 30000,
