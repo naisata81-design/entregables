@@ -2074,6 +2074,25 @@ app.post('/api/vehicles/:id/request-return', async (req, res) => {
                 io.emit('new_mail', msg);
             }
             
+            // ENVIAR POR WHATSAPP A ADMINS MEDIANTE EL CRM
+            try {
+                const crmUrl = process.env.CRM_API_URL || 'https://crm-production-2af7.up.railway.app';
+                const admins = await User.find({ rol: 'admin', telefono: { $exists: true, $ne: '' } });
+                const msjWhatsapp = `*🚗 Solicitud de Devolución*\n\nEl usuario *${vehicle.currentUserName}* ha solicitado la devolución del vehículo:\n*${vehicle.marca} ${vehicle.modelo}*\nPlacas: ${vehicle.placas}`;
+                for (const admin of admins) {
+                    const telLimpio = admin.telefono.replace(/\D/g, '');
+                    if (telLimpio.length >= 10) {
+                        await fetch(`${crmUrl}/api/whatsapp/send`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ to: telLimpio, message: msjWhatsapp })
+                        }).catch(err => console.error('Error enviando WA a admin:', err.message));
+                    }
+                }
+            } catch (waErr) {
+                console.error('Error global enviando whatsapp a admins:', waErr);
+            }
+            
             res.json({ success: true, message: 'Solicitud enviada a los administradores.' });
         } else {
             res.status(404).json({ error: 'No se encontró el préstamo activo para este vehículo.' });
