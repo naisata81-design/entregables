@@ -2061,22 +2061,25 @@ app.post('/api/vehicles/:id/request-return', async (req, res) => {
             
             // Notify admins
             const msg = new InternalMessage({
-                remitente: vehicle.currentUserName || 'Usuario',
-                destinatario: 'Admin',
-                asunto: 'Solicitud de Devolución de Vehículo',
-                mensaje: `El usuario ${vehicle.currentUserName} ha solicitado la devolución del vehículo ${vehicle.marca} ${vehicle.modelo} (${vehicle.placas}).`,
-                leido: false,
-                timestamp: new Date()
+                senderId: req.body.userId || vehicle.currentUserId || 'Sistema',
+                senderName: vehicle.currentUserName || 'Usuario',
+                receiverId: 'admin_general',
+                receiverName: 'Administradores',
+                subject: 'Solicitud de Devolución de Vehículo',
+                body: `El usuario ${vehicle.currentUserName} ha solicitado la devolución del vehículo ${vehicle.marca} ${vehicle.modelo} (${vehicle.placas}).`,
+                isRead: false
             });
             await msg.save();
-            io.emit('new_mail', msg);
+            if (typeof io !== 'undefined') {
+                io.emit('new_mail', msg);
+            }
             
             res.json({ success: true, message: 'Solicitud enviada a los administradores.' });
         } else {
             res.status(404).json({ error: 'No se encontró el préstamo activo para este vehículo.' });
         }
     } catch(e) {
-        res.status(500).json({ error: 'Error al solicitar devolución.' });
+        res.status(500).json({ error: 'Error al solicitar devolución.', detail: e.message });
     }
 });
 
