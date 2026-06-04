@@ -2047,7 +2047,7 @@ app.post('/api/vehicles/:id/request-return', async (req, res) => {
     try {
         const vehicle = await Vehicle.findById(req.params.id);
         if (!vehicle) return res.status(404).json({ error: 'Vehículo no encontrado.' });
-        if (vehicle.estado !== 'Prestado') return res.status(400).json({ error: 'El vehículo no está prestado actualmente.' });
+        if (vehicle.estado !== 'Prestado' && vehicle.estado !== 'Pendiente de Confirmación') return res.status(400).json({ error: 'El vehículo no está prestado actualmente.' });
 
         const prestamoTx = await VehicleTransaction.findOne({
             vehicleId: vehicle._id,
