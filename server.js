@@ -2111,9 +2111,9 @@ async function sendFlespiCommand(flespiId, action) {
         // action === 'off' -> apagar motor (corte de corriente) -> value: true
         // action === 'on' -> encender motor (restablecer corriente) -> value: false
         const cleanId = String(flespiId).trim();
-        // action === 'off' -> apagar motor -> "setdigout 0"
-        // action === 'on' -> encender motor -> "setdigout 1"
-        const cmdText = action === 'off' ? 'setdigout 0' : 'setdigout 1';
+        // action === 'off' -> apagar motor -> "setdigout 1"
+        // action === 'on' -> encender motor -> "setdigout 0"
+        const cmdText = action === 'off' ? 'setdigout 1' : 'setdigout 0';
 
         const payload = [{
             "name": "custom",
