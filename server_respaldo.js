@@ -49,12 +49,14 @@ app.post('/api/sos/engine', async (req, res) => {
 
     try {
         const cleanId = String(identifier).trim();
-        const value = action === 'on' ? false : true;
+        const cmdText = action === 'off' ? 'setdigout 1' : 'setdigout 0';
         
         const payload = [{
+            "name": "custom",
+            "max_attempts": 3,
+            "priority": 0,
             "properties": {
-                "name": "setdigout",
-                "properties": { "value": value }
+                "text": cmdText
             }
         }];
 
@@ -71,7 +73,7 @@ app.post('/api/sos/engine', async (req, res) => {
 
         if (response.ok) {
             console.log(`[SOS] Comando ${action} enviado a unidad ${cleanId}.`);
-            await Vehicle.updateOne({ flespiId: cleanId }, { encendido: !value }); // Actualiza la BD también
+            await Vehicle.updateOne({ flespiId: cleanId }, { encendido: (action === 'on') }); // Actualiza la BD también
             res.json({ success: true, flespiResponse: data });
         } else {
             console.error('[SOS] Error Flespi:', data);
