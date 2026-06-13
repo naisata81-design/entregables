@@ -4,8 +4,8 @@ const cors = require('cors');
 const app = express();
 const PORT = process.env.PORT || 10000;
 
-// Tu Token de Flespi
-const FLESPI_TOKEN = process.env.FLESPI_TOKEN || '933gcAbczGluPERbGkm0ktw72AEA829Jnf1pEEhO8dFjRtJXRfoY2ejMgNkxafb6';
+// Tu Token de Flespi extraído de server.js
+const FLESPI_TOKEN = '933gcAbczGluPERbGkm0ktw72AEA829Jnf1pEEhO8dFjRtJXRfoY2ejMgNkxafb6';
 
 app.use(cors({ origin: '*' }));
 app.use(express.json());
