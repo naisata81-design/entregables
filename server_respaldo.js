@@ -10,20 +10,45 @@ const FLESPI_TOKEN = '933gcAbczGluPERbGkm0ktw72AEA829Jnf1pEEhO8dFjRtJXRfoY2ejMgN
 const MONGODB_URI = 'mongodb+srv://naisata:Hola2025@naisata.kwletg6.mongodb.net/naisata_db?appName=naisata';
 
 app.use(cors({ origin: '*' }));
-app.use(express.json());
+app.use(express.json({ limit: '5mb' }));
 
 mongoose.connect(MONGODB_URI)
     .then(() => console.log('Servidor Respaldo conectado a MongoDB'))
     .catch(err => console.error('Error conectando a MongoDB:', err));
 
+// --- Schemas ligeros (apuntan a las mismas colecciones del servidor principal) ---
+
 const VehicleSchema = new mongoose.Schema({
     marca: String,
     modelo: String,
     placas: String,
+    color: String,
+    estado: String,
     flespiId: String,
-    encendido: Boolean
+    encendido: Boolean,
+    currentUserId: String,
+    currentUserName: String
 }, { collection: 'vehicles' });
 const Vehicle = mongoose.model('Vehicle', VehicleSchema);
+
+const VehicleTransactionSchema = new mongoose.Schema({
+    _id: { type: String, default: () => new mongoose.Types.ObjectId().toString() },
+    vehicleId: String,
+    userId: String,
+    userName: String,
+    tipoMovimiento: String,
+    notas: String,
+    estadoConfirmacion: { type: String, default: 'Confirmado' },
+    fecha: { type: Date, default: Date.now }
+}, { collection: 'vehicletransactions' });
+const VehicleTransaction = mongoose.model('VehicleTransaction', VehicleTransactionSchema);
+
+const UserSchema = new mongoose.Schema({
+    nombre: String,
+    apellido: String,
+    estadoCuenta: String
+}, { collection: 'users' });
+const User = mongoose.model('User', UserSchema);
 
 app.get('/', (req, res) => {
     res.send('Servidor de Respaldo Naisata (Render) Activo 🟢');
@@ -39,7 +64,85 @@ app.get('/api/sos/vehicles', async (req, res) => {
     }
 });
 
-// Ruta de Emergencia SOS
+// Obtener lista completa de vehículos para gestión
+app.get('/api/sos/vehicles/all', async (req, res) => {
+    try {
+        const vehicles = await Vehicle.find().select('marca modelo placas flespiId encendido estado currentUserName');
+        res.json(vehicles);
+    } catch (e) {
+        res.status(500).json({ error: 'Error consultando base de datos' });
+    }
+});
+
+// Obtener lista de usuarios para préstamo
+app.get('/api/sos/users', async (req, res) => {
+    try {
+        const users = await User.find({ estadoCuenta: { $in: ['activa'] } }).select('nombre apellido').sort({ nombre: 1 });
+        res.json(users);
+    } catch (e) {
+        res.status(500).json({ error: 'Error consultando base de datos' });
+    }
+});
+
+// Registrar préstamo en modo emergencia
+app.post('/api/sos/vehicles/loan', async (req, res) => {
+    const { vehicleId, userId, userName, notas } = req.body;
+    if (!vehicleId || !userId || !userName) return res.status(400).json({ error: 'Datos incompletos' });
+    
+    try {
+        const vehicle = await Vehicle.findById(vehicleId);
+        if (!vehicle || vehicle.estado !== 'Disponible') return res.status(400).json({ error: 'Vehículo no disponible' });
+
+        vehicle.estado = 'Prestado'; // Lo marcamos directo como prestado
+        vehicle.currentUserId = userId;
+        vehicle.currentUserName = userName;
+        await vehicle.save();
+
+        await VehicleTransaction.create({
+            vehicleId,
+            userId,
+            userName,
+            tipoMovimiento: 'Préstamo',
+            notas: `[MODO RESPALDO] ${notas || ''}`,
+            estadoConfirmacion: 'Confirmado'
+        });
+
+        res.json({ success: true });
+    } catch (e) {
+        console.error('[SOS Loan]', e);
+        res.status(500).json({ error: 'Error interno guardando préstamo' });
+    }
+});
+
+// Registrar devolución en modo emergencia
+app.post('/api/sos/vehicles/return', async (req, res) => {
+    const { vehicleId, notas } = req.body;
+    if (!vehicleId) return res.status(400).json({ error: 'ID de vehículo requerido' });
+
+    try {
+        const vehicle = await Vehicle.findById(vehicleId);
+        if (!vehicle) return res.status(404).json({ error: 'Vehículo no encontrado' });
+
+        vehicle.estado = 'Disponible';
+        vehicle.currentUserId = null;
+        vehicle.currentUserName = null;
+        await vehicle.save();
+
+        await VehicleTransaction.create({
+            vehicleId,
+            tipoMovimiento: 'Devolución',
+            notas: `[MODO RESPALDO] ${notas || ''}`,
+            estadoConfirmacion: 'Confirmado'
+        });
+
+        res.json({ success: true });
+    } catch (e) {
+        console.error('[SOS Return]', e);
+        res.status(500).json({ error: 'Error interno guardando devolución' });
+    }
+});
+
+// Ruta de Emergencia SOS (Flespi)
 app.post('/api/sos/engine', async (req, res) => {
     const { identifier, action } = req.body;
     
