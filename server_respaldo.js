@@ -18,6 +18,7 @@ mongoose.connect(MONGODB_URI)
 // ── Schemas compatibles con server.js (mismas colecciones) ──────────────────
 
 const VehicleSchema = new mongoose.Schema({
+    _id: { type: String, default: () => new mongoose.Types.ObjectId().toString() },
     marca: String,
     modelo: String,
     placas: String,
