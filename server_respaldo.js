@@ -1,17 +1,42 @@
 const express = require('express');
 const cors = require('cors');
+const mongoose = require('mongoose');
 
 const app = express();
 const PORT = process.env.PORT || 10000;
 
 // Tu Token de Flespi extraído de server.js
 const FLESPI_TOKEN = '933gcAbczGluPERbGkm0ktw72AEA829Jnf1pEEhO8dFjRtJXRfoY2ejMgNkxafb6';
+const MONGODB_URI = 'mongodb+srv://naisata:Hola2025@naisata.kwletg6.mongodb.net/naisata_db?appName=naisata';
 
 app.use(cors({ origin: '*' }));
 app.use(express.json());
 
+mongoose.connect(MONGODB_URI)
+    .then(() => console.log('Servidor Respaldo conectado a MongoDB'))
+    .catch(err => console.error('Error conectando a MongoDB:', err));
+
+const VehicleSchema = new mongoose.Schema({
+    marca: String,
+    modelo: String,
+    placas: String,
+    flespiId: String,
+    encendido: Boolean
+}, { collection: 'vehicles' });
+const Vehicle = mongoose.model('Vehicle', VehicleSchema);
+
 app.get('/', (req, res) => {
     res.send('Servidor de Respaldo Naisata (Render) Activo 🟢');
+});
+
+// Obtener lista de vehículos
+app.get('/api/sos/vehicles', async (req, res) => {
+    try {
+        const vehicles = await Vehicle.find({ flespiId: { $ne: null, $ne: '' } }).select('marca modelo placas flespiId encendido');
+        res.json(vehicles);
+    } catch (e) {
+        res.status(500).json({ error: 'Error consultando base de datos' });
+    }
 });
 
 // Ruta de Emergencia SOS
@@ -23,11 +48,7 @@ app.post('/api/sos/engine', async (req, res) => {
     }
 
     try {
-        // En un caso real podrías conectarte aquí a MongoDB Atlas para buscar el ID Flespi basado en placas.
-        // Pero para el modo de emergencia absoluto, asumiremos que se manda el Flespi ID directamente.
         const cleanId = String(identifier).trim();
-        
-        // Flespi 'setdigout': false (0) es encender/desbloquear. true (1) es apagar/bloquear.
         const value = action === 'on' ? false : true;
         
         const payload = [{
@@ -50,6 +71,7 @@ app.post('/api/sos/engine', async (req, res) => {
 
         if (response.ok) {
             console.log(`[SOS] Comando ${action} enviado a unidad ${cleanId}.`);
+            await Vehicle.updateOne({ flespiId: cleanId }, { encendido: !value }); // Actualiza la BD también
             res.json({ success: true, flespiResponse: data });
         } else {
             console.error('[SOS] Error Flespi:', data);
